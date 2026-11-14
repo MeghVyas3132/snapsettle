@@ -1,0 +1,9 @@
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/dry-run/
+node_modules/
+.env
+.env.*
+*.log
+.DS_Store
+dashboard/dist/
