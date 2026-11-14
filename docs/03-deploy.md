@@ -26,6 +26,7 @@ forge script script/Deploy.s.sol:DeployDestination --rpc-url unichain_sepolia --
 forge script script/Deploy.s.sol:DeployReactive    --rpc-url lasna            --account snapsettle-deployer --broadcast
 forge script script/Deploy.s.sol:DeployOrigin      --rpc-url base_sepolia     --account snapsettle-deployer --broadcast
 forge script script/Deploy.s.sol:WireReactive      --rpc-url lasna            --account snapsettle-deployer --broadcast
+forge script script/Deploy.s.sol:DeployResolver    --rpc-url base_sepolia     --account snapsettle-deployer --broadcast   # LOOP_LATENCY=<measured p95>
 ```
 
 Addresses land in `contracts/deployments/{1-destination,2-reactive,3-origin}.json`.

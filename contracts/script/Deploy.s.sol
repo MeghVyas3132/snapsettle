@@ -6,6 +6,7 @@ import {IPayable} from "@reactive/src/interfaces/IPayable.sol";
 import {DestinationSettler} from "../src/DestinationSettler.sol";
 import {SnapsettleReactive} from "../src/SnapsettleReactive.sol";
 import {OriginEscrow} from "../src/OriginEscrow.sol";
+import {SnapsettleResolver} from "../src/SnapsettleResolver.sol";
 
 /// @notice Four-step deployment across three chains. Run in order (see docs/03-deploy.md). Each step writes
 ///         its addresses to `deployments/<step>.json`; later steps read them.
@@ -86,5 +87,24 @@ contract WireReactive is Base {
         rc.setOriginEscrow(escrow);
         vm.stopBroadcast();
         console2.log("wired origin escrow", escrow);
+    }
+}
+
+/// Step 5, Base Sepolia: forge script script/Deploy.s.sol:DeployResolver --rpc-url base_sepolia --account snapsettle-deployer --broadcast
+/// LOOP_LATENCY (seconds) should be the measured full-loop p95; the default 10 is an ESTIMATE until the bench runs.
+contract DeployResolver is Base {
+    function run() external {
+        require(block.chainid == BASE_SEPOLIA, "run on Base Sepolia");
+        OriginEscrow escrow = OriginEscrow(payable(_read("3-origin", "originEscrow")));
+        address rc = _read("2-reactive", "snapsettleReactive");
+        uint32 loop = uint32(vm.envOr("LOOP_LATENCY", uint256(10)));
+        SnapsettleResolver.Tier[] memory t = new SnapsettleResolver.Tier[](3);
+        t[0] = SnapsettleResolver.Tier(100e6, 0);
+        t[1] = SnapsettleResolver.Tier(10_000e6, 30);
+        t[2] = SnapsettleResolver.Tier(type(uint256).max, 300);
+        vm.startBroadcast();
+        SnapsettleResolver resolver = new SnapsettleResolver(escrow, LASNA, rc, loop, t);
+        vm.stopBroadcast();
+        _write("5-resolver", "snapsettleResolver", address(resolver));
     }
 }

@@ -31,6 +31,7 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
         uint256 inputAmount;
         uint32 fillDeadline;
         Status status;
+        bytes32 termsHash;
     }
 
     /// @notice Seconds after `fillDeadline` before a refund can be requested. Covers the time the
@@ -81,7 +82,7 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
         }
 
         id = OrderLib.orderId(block.chainid, address(this), msg.sender, nonces[msg.sender]++, d);
-        orders[id] = Order(msg.sender, d.inputToken, d.inputAmount, d.fillDeadline, Status.Open);
+        orders[id] = Order(msg.sender, d.inputToken, d.inputAmount, d.fillDeadline, Status.Open, OrderLib.hash(d));
 
         IERC20(d.inputToken).safeTransferFrom(msg.sender, address(this), d.inputAmount);
         emit Opened(id, msg.sender, d);
