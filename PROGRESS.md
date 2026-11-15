@@ -15,8 +15,10 @@ Resume here. Update after every milestone.
 - 2026-11-15: Finish review #1 = fix (8 items); all applied: readouts on the clock housing (no hero cards), p95 tick, bezels/seam/rocker; tier labels from each run's recorded policy (bench now records tierDelay/tierPolicy/contracts); column semantics; phone reflow (two-line moves, no sideways scroll); +N over policy; shared loop geometry on Leg splits; condensed-caps headings; live-empty planned tiers; mode-dependent source copy. Verdict pass requested.
 - 2026-11-15: Video pipeline `pnpm record` (Playwright 1920×1080, captions injected as an overlay since this ffmpeg has no text filters, one real order mid-recording, h264_videotoolbox MP4 capped 2:55). docs/VIDEO.md script.
 
-## Next
-1. Dashboard finish review: SHIP (two rounds, all material fixes resolved). DESIGN.md via the documenter (running). Detector false positive (flat-type-hierarchy on index.html without its stylesheet) suppressed narrowly in .impeccable/config.json.
+- 2026-11-15: DESIGN.md + .impeccable/design.json written by the documenter (Tournament Hall world). Row dimming changed to an AA-safe colour (it was 0.45 opacity); unused shadow token dropped. Submission draft in docs/SUBMISSION.md (placeholders «…» to fill from evidence/live).
+
+## Next (everything below is blocked on the owner's deploy + funding)
+1. (done) Dashboard shipped and documented. Everything that does not need live funds is complete.
 2. Video pipeline validated on LOCAL (2:21, a real order recorded mid-video, captions OK). Recorder now uses a 1440×810 viewport into 1080p. Final video gets recorded on LIVE; at ~56 MB it fits GitHub's 100 MB limit (commit with `git add -f video/snapsettle-demo-live.mp4`) or host it if the owner prefers.
 3. LIVE (blocked on owner funding): deploy 5 steps (docs/03-deploy.md, env TIER0_MAX/TIER1_MAX defaults, REFUND_GRACE=60, LOOP_LATENCY = measured p95 later), verify sources, run solver + bench 50+ loops per tier, negative cases, `SNAP_ENV=live pnpm judge`, rebuild dashboard data.
 4. Public repo MeghVyas3132/snapsettle (~28 Nov), Pages deploy, submission on DoraHacks.
