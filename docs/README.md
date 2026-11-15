@@ -7,4 +7,5 @@
 | [DECISIONS.md](DECISIONS.md) | Design decisions and why (append-only log) |
 | [03-deploy.md](03-deploy.md) | Funding and deploy steps, in order |
 | [04-plan.md](04-plan.md) | Schedule, status, next steps |
+| [05-finality-policy.md](05-finality-policy.md) | Per-order finality: the answer to Reactive's "true enough to act on" question |
 | `evidence/` | Bench results and tx-hash tables (created when the loop runs live) |

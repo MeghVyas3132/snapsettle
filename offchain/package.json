@@ -7,8 +7,8 @@
     "solver": "tsx src/solver.ts",
     "bench": "tsx src/bench.ts",
     "negative": "tsx src/negative.ts",
-    "report": "tsx src/report.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "judge": "tsx src/judge.ts"
   },
   "dependencies": {
     "viem": "^2.57.19"
