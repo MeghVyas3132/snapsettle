@@ -10,3 +10,6 @@ dashboard/dist/
 contracts/deployments/local/*.json
 .local/
 evidence/local/
+dashboard/public/data/
+.playwright-mcp/
+.impeccable/review/

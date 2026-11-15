@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Snapsettle · intents settled by Reactive</title>
+    <meta name="description" content="Live view of Snapsettle: cross-chain intents opened on Base Sepolia, filled on Unichain Sepolia and settled by a Reactive Network contract on Lasna." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%233f2a1d'/%3E%3Ccircle cx='16' cy='17' r='9' fill='%23eeeed2'/%3E%3Cpath d='M16 17V10' stroke='%231d1a16' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M15 6h7v4h-7z' fill='%23c8322a'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="bar__brand">
+        <span class="bar__name">Snapsettle</span>
+        <span class="bar__tag">intents settled by Reactive</span>
+      </div>
+      <nav class="bar__env" aria-label="Data source" id="env-switch"></nav>
+      <ul class="bar__chains" id="chains" aria-label="Chain status"></ul>
+    </header>
+
+    <div class="notice" id="notice" hidden></div>
+
+    <main class="board">
+      <section class="duel" aria-labelledby="duel-h">
+        <h1 id="duel-h" class="duel__title">When does the solver get its money back?</h1>
+        <p class="duel__lede">A solver fills your order on Unichain from its own inventory. Snapsettle's Reactive contract sees the fill and repays the solver on Base. No challenge window.</p>
+        <div class="duel__clock" id="clock"></div>
+        <div class="duel__plates">
+          <div class="plate plate--across">
+            <span class="plate__who">Across · optimistic challenge window</span>
+            <span class="plate__time">2:00:00</span>
+            <span class="plate__src">Default challenge period, <a href="https://docs.across.to/user-docs/how-across-works/speed" target="_blank" rel="noopener">Across docs</a></span>
+          </div>
+          <div class="plate plate--snap">
+            <span class="plate__who">Snapsettle · fill → solver repaid, p50</span>
+            <span class="plate__time" id="snap-time">—</span>
+            <span class="plate__src" id="snap-src">Waiting for bench data</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="splits" aria-labelledby="splits-h">
+        <div class="splits__head">
+          <h2 id="splits-h">Leg splits</h2>
+          <div class="tabs" role="tablist" aria-label="Finality tier" id="tier-tabs"></div>
+        </div>
+        <p class="splits__policy" id="tier-policy"></p>
+        <table class="splits__table">
+          <thead><tr><th scope="col">Leg</th><th scope="col" class="num">p50</th><th scope="col" class="num">p95</th><th scope="col" class="scale" aria-label="Scale"></th></tr></thead>
+          <tbody id="splits-body"></tbody>
+        </table>
+        <p class="splits__src" id="splits-src"></p>
+      </section>
+
+      <section class="sheet" aria-labelledby="sheet-h">
+        <div class="sheet__head">
+          <h2 id="sheet-h">Scoresheet</h2>
+          <p class="sheet__note" id="sheet-note"></p>
+        </div>
+        <div class="sheet__scroll">
+          <table class="sheet__table">
+            <thead>
+              <tr>
+                <th scope="col">Move</th><th scope="col">Order</th><th scope="col" class="num">Size</th><th scope="col">Tier</th>
+                <th scope="col" class="num" title="Seconds from open to fill">Fill</th>
+                <th scope="col" class="num" title="Seconds from fill to FillAccepted on Lasna">Seen</th>
+                <th scope="col" class="num" title="Seconds from fill to Settled on Base">Repaid</th>
+                <th scope="col" class="num" title="Seconds from open to Settled">Total</th>
+                <th scope="col">State</th>
+              </tr>
+            </thead>
+            <tbody id="sheet-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="checks" aria-labelledby="checks-h">
+        <h2 id="checks-h">Refusals, on-chain</h2>
+        <ul class="checks__list" id="checks"></ul>
+      </section>
+    </main>
+
+    <footer class="foot" id="foot"></footer>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
