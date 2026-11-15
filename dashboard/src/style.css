@@ -53,7 +53,6 @@
   --rule-strong: rgba(29, 26, 22, 0.32);
   --radius: 6px;
   --gap: clamp(16px, 2.2vw, 32px);
-  --shadow-housing: 0 18px 32px -18px rgba(46, 30, 20, 0.55), 0 2px 4px rgba(46, 30, 20, 0.25);
 
   --font-head: "Barlow Condensed", "Arial Narrow", sans-serif;
   --font-body: "Barlow", system-ui, sans-serif;
@@ -226,10 +225,11 @@ h1, h2, h3 { font-family: var(--font-head); font-weight: 700; letter-spacing: 0.
 .sheet__table td { padding: 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
 .sheet__table th + th, .sheet__table td + td { border-left: 1px solid var(--rule); }
 .over { display: block; font-size: 12px; font-weight: 500; color: var(--ink-500); }
-.sheet__table tbody tr.move { cursor: pointer; transition: opacity 200ms ease-out, background-color 200ms ease-out; }
+.sheet__table tbody tr.move { cursor: pointer; transition: color 200ms ease-out, background-color 200ms ease-out; }
 .sheet__table tbody tr.move:nth-of-type(4n+1) { background: var(--buff-50); }
 .sheet__table tbody tr.move:hover { background: var(--buff-200); }
-.sheet__table tbody.has-open tr.move:not(.is-open) { opacity: 0.45; }
+.sheet__table tbody.has-open tr.move:not(.is-open), .sheet__table tbody.has-open tr.move:not(.is-open) .mono { color: var(--ink-500); }
+.sheet__table tbody.has-open tr.move:not(.is-open) .state::before { filter: saturate(0.4); }
 .sheet__table tbody tr.move.is-open { background: var(--green-100); }
 .move-no { font-family: var(--font-head); font-weight: 700; font-size: 17px; }
 .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; color: var(--ink-700); }

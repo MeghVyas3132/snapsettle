@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-15T09:00:00Z",
+  "title": "Design System: Snapsettle",
+  "components": [
+    {
+      "name": "Env Switch (on walnut)",
+      "kind": "nav",
+      "refersTo": "segmented-dark",
+      "description": "LIVE / LOCAL data source switch in the walnut top bar.",
+      "html": "<div class=\"ds-bar\"><nav class=\"ds-env\"><button aria-pressed=\"false\">Live testnets</button><button aria-pressed=\"true\">Local harness</button></nav></div>",
+      "css": ".ds-bar{background:var(--walnut-800);padding:14px 24px;border-bottom:3px solid var(--walnut-900)}.ds-env{display:inline-flex;border:1px solid rgba(238,238,210,.35);border-radius:6px;overflow:hidden}.ds-env button{font:600 13px/1 \"Barlow\",system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:var(--walnut-200);background:transparent;border:0;padding:8px 14px;cursor:pointer}.ds-env button[aria-pressed=\"true\"]{background:var(--buff-100);color:var(--walnut-900)}.ds-env button:hover:not([aria-pressed=\"true\"]){color:var(--buff-50)}.ds-env button:focus-visible{outline:2px solid var(--green-600);outline-offset:2px}"
+    },
+    {
+      "name": "Tier Tabs",
+      "kind": "chip",
+      "refersTo": "tabs",
+      "description": "Segmented tabs on buff for choosing the finality tier.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button role=\"tab\" aria-selected=\"true\">On sight</button><button role=\"tab\" aria-selected=\"false\">30 s</button><button role=\"tab\" aria-selected=\"false\">5:00</button></div>",
+      "css": ".ds-tabs{display:inline-flex;border:1px solid var(--rule-strong);border-radius:6px;overflow:hidden;background:var(--buff-100)}.ds-tabs button{font:600 13px/1 \"Barlow\",system-ui,sans-serif;padding:8px 12px;border:0;background:transparent;color:var(--ink-700);cursor:pointer}.ds-tabs button+button{border-left:1px solid var(--rule-strong)}.ds-tabs button[aria-selected=\"true\"]{background:var(--green-500);color:var(--buff-50)}.ds-tabs button:hover:not([aria-selected=\"true\"]){background:var(--buff-200)}.ds-tabs button:focus-visible{outline:2px solid var(--green-600);outline-offset:2px}"
+    },
+    {
+      "name": "Verdict Chips",
+      "kind": "chip",
+      "refersTo": "verdict-pass",
+      "description": "Pass / fail verdict for an on-chain refusal check.",
+      "html": "<span class=\"ds-verdict\">held</span> <span class=\"ds-verdict ds-verdict--fail\">failed</span>",
+      "css": ".ds-verdict{display:inline-block;padding:1px 7px;border-radius:3px;font:700 12px/1.5 \"Barlow Condensed\",\"Arial Narrow\",sans-serif;letter-spacing:.08em;text-transform:uppercase;color:var(--green-700);background:var(--green-100)}.ds-verdict--fail{color:var(--flag);background:var(--flag-100)}"
+    },
+    {
+      "name": "State Dots",
+      "kind": "custom",
+      "description": "Order state label with a coloured dot in the scoresheet.",
+      "html": "<span class=\"ds-state\" data-s=\"repaid\">Repaid</span> <span class=\"ds-state\" data-s=\"waiting\">Waiting</span> <span class=\"ds-state\" data-s=\"refunded\">Refunded</span> <span class=\"ds-state\" data-s=\"open\">Open</span>",
+      "css": ".ds-state{display:inline-flex;align-items:center;gap:6px;margin-right:12px;font:500 15px \"Barlow\",system-ui,sans-serif;color:var(--ink-900)}.ds-state::before{content:\"\";width:8px;height:8px;border-radius:50%;background:var(--ink-500)}.ds-state[data-s=\"repaid\"]::before{background:var(--green-600)}.ds-state[data-s=\"waiting\"]::before{background:var(--amber)}.ds-state[data-s=\"refunded\"]::before{background:var(--walnut-700)}.ds-state[data-s=\"open\"]::before{background:var(--buff-200);box-shadow:inset 0 0 0 1px var(--ink-500)}"
+    },
+    {
+      "name": "Leg Split Row",
+      "kind": "custom",
+      "refersTo": "bar-track",
+      "description": "A leg with p50/p95 and its shared-scale bar with policy tick.",
+      "html": "<div class=\"ds-split\"><div><span class=\"ds-leg\">Fill \u2192 solver repaid</span><span class=\"ds-sub\">Reactive settlement</span></div><b>14 s</b><b>22 s</b><div class=\"ds-track\"><span class=\"ds-p95\" style=\"width:62%\"></span><span class=\"ds-p50\" style=\"width:46%\"></span><span class=\"ds-policy\" style=\"left:55%\"></span></div></div>",
+      "css": ".ds-split{display:grid;grid-template-columns:1fr auto auto 34%;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--rule);font:400 15px \"Barlow\",system-ui,sans-serif;font-variant-numeric:tabular-nums;color:var(--ink-900)}.ds-split b{font-weight:600;text-align:right}.ds-leg{display:block;font-weight:500}.ds-sub{display:block;font-size:13px;color:var(--ink-500)}.ds-track{position:relative;height:12px;background:var(--buff-200);border-radius:2px}.ds-p95{position:absolute;inset:0 auto 0 0;background:var(--green-100);border-radius:2px}.ds-p50{position:absolute;inset:2px auto 2px 0;background:var(--green-600);border-radius:2px}.ds-policy{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--flag)}"
+    },
+    {
+      "name": "Scoresheet Move",
+      "kind": "card",
+      "refersTo": "sheet-row",
+      "description": "Ruled scoresheet rows; hover and open states.",
+      "html": "<table class=\"ds-sheet\"><thead><tr><th>Move</th><th class=\"n\">Fill \u2192 repaid</th><th>State</th></tr></thead><tbody><tr class=\"is-open\" tabindex=\"0\"><td class=\"no\">015</td><td class=\"n\">5:29<small>+29 s</small></td><td>Repaid</td></tr><tr tabindex=\"0\"><td class=\"no\">014</td><td class=\"n\">5:33</td><td>Repaid</td></tr></tbody></table>",
+      "css": ".ds-sheet{width:100%;border-collapse:collapse;font:400 15px \"Barlow\",system-ui,sans-serif;font-variant-numeric:tabular-nums;color:var(--ink-900);background:var(--buff-100);border-top:2px solid var(--ink-900)}.ds-sheet th{font:600 12px \"Barlow\",system-ui,sans-serif;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-500);text-align:left;padding:10px 10px 8px;border-bottom:1px solid var(--rule-strong)}.ds-sheet td{padding:10px;border-bottom:1px solid var(--rule)}.ds-sheet td+td,.ds-sheet th+th{border-left:1px solid var(--rule)}.ds-sheet .n{text-align:right}.ds-sheet small{display:block;font-size:12px;font-weight:500;color:var(--ink-500)}.ds-sheet .no{font:700 17px \"Barlow Condensed\",\"Arial Narrow\",sans-serif}.ds-sheet tbody tr{cursor:pointer;transition:background-color 200ms ease-out}.ds-sheet tbody tr:hover{background:var(--buff-200)}.ds-sheet tbody tr.is-open{background:var(--green-100)}.ds-sheet tbody tr:focus-visible{outline:2px solid var(--green-600);outline-offset:-2px}"
+    },
+    {
+      "name": "Chess Clock Face",
+      "kind": "custom",
+      "description": "Signature: one clock face on the walnut housing with sweep, flag and lettered readout.",
+      "html": "<svg class=\"ds-clock\" viewBox=\"0 0 260 300\" role=\"img\" aria-label=\"Clock face\"><rect x=\"0\" y=\"0\" width=\"260\" height=\"300\" rx=\"26\" class=\"h\"/><circle cx=\"130\" cy=\"120\" r=\"105\" class=\"bz\"/><circle cx=\"130\" cy=\"120\" r=\"96\" class=\"f\"/><path class=\"sw\" d=\"M130 120 L130 30 A90 90 0 0 1 218 100 Z\"/><path class=\"fl\" d=\"M128 46 l0 -15 l15 5 l-15 5z\"/><line class=\"hd\" x1=\"130\" y1=\"134\" x2=\"200\" y2=\"104\"/><circle cx=\"130\" cy=\"120\" r=\"8\" class=\"hb\"/><text x=\"130\" y=\"250\" text-anchor=\"middle\" class=\"who\">SNAPSETTLE REPAY</text><text x=\"130\" y=\"288\" text-anchor=\"middle\" class=\"v\">14 s</text></svg>",
+      "css": ".ds-clock{width:220px;height:auto;filter:drop-shadow(0 22px 22px rgba(46,30,20,.28))}.ds-clock .h{fill:var(--walnut-800)}.ds-clock .bz{fill:var(--walnut-900)}.ds-clock .f{fill:var(--buff-50);stroke:var(--walnut-900);stroke-width:2}.ds-clock .sw{fill:var(--green-100)}.ds-clock .fl{fill:var(--flag)}.ds-clock .hd{stroke:var(--green-700);stroke-width:5;stroke-linecap:round;transition:transform 900ms cubic-bezier(.16,1,.3,1)}.ds-clock .hb{fill:var(--ink-900)}.ds-clock .who{font:600 15px \"Barlow\",system-ui,sans-serif;letter-spacing:.12em;fill:var(--walnut-200)}.ds-clock .v{font:700 40px \"Barlow Condensed\",\"Arial Narrow\",sans-serif;fill:#b9d995}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Tournament Hall",
+    "overview": "Snapsettle is drawn from the materials of an over-the-board chess tournament: a walnut clock housing, the buff-and-green vinyl of a roll-up board, piece-black ink on paper, and the small red flag that falls when time runs out. The page reads like a hall table: a chess clock at large scale, then a scoresheet with ruled rows where every order is a numbered move.\n\nDensity is high and quiet. Information sits on hairline-ruled rows on a single buff ground, never in cards or tiles. Walnut appears only where an object would be wooden: the top bar and the clock housing. Green carries data and selection, the way board squares carry pieces. Red appears only for a window or policy limit that runs out. Every time is set in tabular figures, so columns of numbers align like a scoresheet.\n\nMotion is mechanical and rare: a clock button presses and a hand sweeps to its stop, both on one long ease-out, and both stand still under reduced motion.",
+    "keyCharacteristics": [
+      "One buff ground; walnut only for the bar and the clock body.",
+      "Hairline ruled rows, heavy ink rules under section heads, no cards.",
+      "Condensed grotesk caps for headings and readouts; Barlow body with tabular figures everywhere.",
+      "Green is data and selection; one red flag marks the limit.",
+      "The chess clock is the signature object and is drawn, not illustrated."
+    ],
+    "rules": [
+      {
+        "name": "The One Flag Rule",
+        "body": "Red marks only a limit that runs out: the challenge window, a policy delay, a failed check, a chain that is down. It is never decoration or emphasis.",
+        "section": "colors"
+      },
+      {
+        "name": "The Wood Is Furniture Rule",
+        "body": "Walnut is the colour of objects (the top bar, the clock body). Content surfaces stay buff.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Figures Rule",
+        "body": "`font-variant-numeric: tabular-nums` is set on the body and inherited everywhere; numeric columns are right-aligned.",
+        "section": "typography"
+      },
+      {
+        "name": "The Caps Belong To The Condensed Face Rule",
+        "body": "Headings are condensed caps. Uppercase in the body face is reserved for table column labels, segmented controls and clock-face lettering, always letter-spaced (0.06em to 0.12em).",
+        "section": "typography"
+      },
+      {
+        "name": "The Only Object Casts A Shadow Rule",
+        "body": "Only the drawn clock has a shadow. Data surfaces are flat and ruled.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep content on the buff ground with hairline rules (rule, rule-strong) and a 2px Piece Black rule under each section head.",
+      "Do set every time and amount in tabular figures, right-aligned, with its source (tx hash, run id or cited doc) in reach.",
+      "Do use green tones for data, progress and selection, and reserve Flag Red for a limit that runs out.",
+      "Do keep walnut for the top bar and the clock body.",
+      "Do put clock-related motion behind `prefers-reduced-motion: no-preference` with the 0.16, 1, 0.3, 1 ease-out.",
+      "Do use the 2px Played Green focus outline (2px offset) on every interactive element."
+    ],
+    "donts": [
+      "Don't wrap data in cards, tiles or shadowed panels; the clock is the only object with depth.",
+      "Don't use Flag Red for emphasis, links or brand accents.",
+      "Don't set headings in the body face or numbers in proportional figures.",
+      "Don't imitate Reactive Network's or Across's branding."
+    ]
+  }
+}
