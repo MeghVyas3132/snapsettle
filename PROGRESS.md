@@ -17,7 +17,7 @@ Resume here. Update after every milestone.
 
 ## Next
 1. Dashboard finish review: SHIP (two rounds, all material fixes resolved). DESIGN.md via the documenter (running). Detector false positive (flat-type-hierarchy on index.html without its stylesheet) suppressed narrowly in .impeccable/config.json.
-2. Test-record a LOCAL video to validate the pipeline (not for submission).
+2. Video pipeline validated on LOCAL (2:21, a real order recorded mid-video, captions OK). Recorder now uses a 1440×810 viewport into 1080p. Final video gets recorded on LIVE; at ~56 MB it fits GitHub's 100 MB limit (commit with `git add -f video/snapsettle-demo-live.mp4`) or host it if the owner prefers.
 3. LIVE (blocked on owner funding): deploy 5 steps (docs/03-deploy.md, env TIER0_MAX/TIER1_MAX defaults, REFUND_GRACE=60, LOOP_LATENCY = measured p95 later), verify sources, run solver + bench 50+ loops per tier, negative cases, `SNAP_ENV=live pnpm judge`, rebuild dashboard data.
 4. Public repo MeghVyas3132/snapsettle (~28 Nov), Pages deploy, submission on DoraHacks.
 
