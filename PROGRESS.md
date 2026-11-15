@@ -17,12 +17,13 @@ Resume here. Update after every milestone.
 
 - 2026-11-15: DESIGN.md + .impeccable/design.json written by the documenter (Tournament Hall world). Row dimming changed to an AA-safe colour (it was 0.45 opacity); unused shadow token dropped. Submission draft in docs/SUBMISSION.md (placeholders «…» to fill from evidence/live).
 
-## Next (everything below is blocked on the owner's deploy + funding)
-1. (done) Dashboard shipped and documented. Everything that does not need live funds is complete.
-2. Video pipeline validated on LOCAL (2:21, a real order recorded mid-video, captions OK). Recorder now uses a 1440×810 viewport into 1080p. Final video gets recorded on LIVE; at ~56 MB it fits GitHub's 100 MB limit (commit with `git add -f video/snapsettle-demo-live.mp4`) or host it if the owner prefers.
-3. LIVE (blocked on owner funding): deploy 5 steps (docs/03-deploy.md, env TIER0_MAX/TIER1_MAX defaults, REFUND_GRACE=60, LOOP_LATENCY = measured p95 later), verify sources, run solver + bench 50+ loops per tier, negative cases, `SNAP_ENV=live pnpm judge`, rebuild dashboard data.
-4. Public repo MeghVyas3132/snapsettle (~28 Nov), Pages deploy, submission on DoraHacks.
+- 2026-11-15: LIVE. Funded via Chrome (Google Sepolia faucet 0.05, PoW faucet 2.098 SepETH, Circle 20 USDC × 2), lREACT 31.5 via the Sepolia faucet, bridged 0.4 ETH → Base and 0.15 → Unichain (test deposits first). Deployed all 5 contracts; Sourcify exact match on all 4 addresses (evidence/live/DEPLOYMENT.md). First live loop: open → repaid in 34 Base blocks (6.8 s). Polling hardened (retrying block reads, log re-scan overlap, solver receipt time as the fill clock).
+
+## Next
+1. Live benches: tier 0 (running), tier 1 (n=50, concurrency 5), tier 2 (n=50, concurrency 6). Rebalancing is automatic.
+2. Negative cases live (stop the solver bot first).
+3. `SNAP_ENV=live pnpm judge` → JUDGE.md; set LOOP_LATENCY? (the resolver is already deployed with 10 s; compare with the measured p95 and note it in docs); rebuild dashboard data; record the live video.
+4. Public repo + Pages (~28 Nov, or earlier if everything is done), then the submission (show the owner first).
 
 ## Blockers (owner)
-- Fund ONE address, the deployer `0x0510CB696e7796a456c24d0c291590E22AfDC1D5`, with: Base Sepolia ETH ≈ 0.25, Unichain Sepolia ETH ≈ 0.05, Circle test USDC ≈ 10 on Base Sepolia and ≈ 10 on Unichain Sepolia (faucet.circle.com). Everything else is scripted: `pnpm fund distribute`, then `scripts/deploy-live.sh`.
-- Track-fit question in t.me/reactivedevs (draft in ~/Desktop/Larp/reactive-omni-build-plan.md).
+- None for the live runs. Optional: the track-fit question in t.me/reactivedevs.
