@@ -7,6 +7,9 @@ import { pub, addr, abi, sleep, now, blockTs } from "./common.ts";
 export type Sighting = { block: bigint; blockTs: bigint; tx: Hex; seenAtMs: number; args: Record<string, unknown> };
 type Key = string; // `${event}:${orderId}`
 
+// A watcher that falls behind must catch up in chunks the RPC accepts, or every later poll fails.
+const MAX_RANGE = 190n;
+
 class ChainWatcher {
   private from = 0n;
   private tsCache = new Map<bigint, bigint>();
@@ -34,7 +37,7 @@ class ChainWatcher {
   async poll() {
     const head = await this.client.getBlockNumber();
     if (head <= this.from) return;
-    const to = head - this.from > 500n ? this.from + 500n : head; // stay under getLogs range limits
+    const to = head - this.from > MAX_RANGE ? this.from + MAX_RANGE : head; // Base Sepolia's public RPC rejects getLogs over 200 blocks
     const seen = now();
     for (const eventName of this.events) {
       const logs = await this.client.getContractEvents({ address: this.address, abi: this.abi, eventName, fromBlock: this.from + 1n, toBlock: to });

@@ -6,6 +6,8 @@
     "relay:local": "tsx src/relay-local.ts",
     "solver": "tsx src/solver.ts",
     "bench": "tsx src/bench.ts",
+    "recover": "tsx src/recover.ts",
+    "demo": "tsx src/demo.ts",
     "negative": "tsx src/negative.ts",
     "typecheck": "tsc --noEmit",
     "judge": "tsx src/judge.ts",

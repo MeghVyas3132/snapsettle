@@ -11,6 +11,16 @@
         ],
         "createdAt": "2026-11-15T02:43:22.509Z",
         "reason": "agent: false positive, static scan of index.html without src/style.css; rendered h1 clamp(30px,3.3vw,46px), h2 24px, body 16px"
+      },
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          "dashboard/index.html",
+          "index.html"
+        ],
+        "createdAt": "2026-11-15T20:06:58.946Z",
+        "reason": "false positive: static scan of index.html without src/style.css; rendered h1 clamp(40px,5vw,80px), h2 clamp(36px,4.4vw,68px), close line up to 132px, body 17px"
       }
     ]
   }

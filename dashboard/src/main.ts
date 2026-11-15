@@ -1,592 +1,501 @@
+import "@fontsource-variable/funnel-display";
+import "@fontsource-variable/martian-mono";
 import "./style.css";
-import { createPublicClient, http, parseAbiItem, type Address, type Hex, type PublicClient } from "viem";
-import { mountClock } from "./clock";
+import dsegUrl from "dseg/fonts/DSEG7-Classic/DSEG7Classic-Bold.woff2?url";
+import type { Hex } from "viem";
+import { store, statMs, LEGS, fmtS, crossChain, fmtUsdc, short, esc, link, type Env, type Row } from "./data";
+import { ClockScene, state, webglAvailable } from "./scene";
+import { note, layoutNotes } from "./notes";
+import { setupScroll, intro, buildStory, onResizeRebuild, goTo, reduced } from "./story";
+import { marquee, tickers, headings, magnet, animateNewRows } from "./ui";
+import { initLive, openOwnOrder, runDemoOrder } from "./live";
 
-// ---------------------------------------------------------------- types
-
-type Env = "live" | "local";
-type Config = {
-  env: Env;
-  deployed: boolean;
-  rpc: { origin: string; dest: string; lasna: string };
-  chains: { origin: number; dest: number; lasna: number };
-  explorers: { origin: string | null; dest: string | null; lasna: string | null };
-  plannedTiers?: Array<{ maxAmount: string; delay: number }>;
-  addresses: { escrow: Address | null; destinationSettler: Address | null; reactive: Address | null; resolver: Address | null; tokenOrigin: Address | null; tokenDest: Address | null };
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+/** Sets innerHTML only when it changed: live polls every few seconds must not rebuild (and re-animate) the page. */
+const put = (id: string, html: string) => {
+  const el = $(id);
+  if (el.dataset.html === html) return false;
+  el.dataset.html = html;
+  el.innerHTML = html;
+  return true;
 };
-type Stat = { n: number; min: number; p50: number; p95: number; max: number };
-type Run = {
-  run: string; env: Env; tier: number; tierDelay?: number; amount: string; n: number; ok: number;
-  summary: Record<string, Stat>;
-  loops: Array<{ i: number; orderId: Hex; ok: boolean; seg: Record<string, number | null>; tx: Record<string, Hex | undefined> }>;
+/** A seconds value that rolls up when it comes into view (Number Ticker); minutes stay static. */
+const tk = (sec: number, text: string) => text.startsWith("<") ? `&lt;${text.slice(1)}` : (sec < 60 && text.endsWith(" s") ? `<span data-tick="${sec}" data-dec="${sec < 10 && sec % 1 ? 1 : 0}" data-unit=" s">${text}</span>` : text);
+const ACROSS_DOCS = "https://docs.across.to/user-docs/how-across-works/speed";
+const REPO = "https://github.com/MeghVyas3132/snapsettle";
+
+let scene: ClockScene | null = null;
+let story: ReturnType<typeof buildStory> | null = null;
+let replaying = false;
+
+// ---------------------------------------------------------------- formatting for the LCDs
+
+const hms = (s: number, tenths = false) => {
+  const neg = s < 0;
+  s = Math.abs(s);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const ss = tenths ? sec.toFixed(1).padStart(4, "0") : String(Math.floor(sec)).padStart(2, "0");
+  return `${neg ? "-" : ""}${h}:${String(m).padStart(2, "0")}:${ss}`;
 };
-type Negative = { run: string; name: string; pass: boolean; detail: string; tx: Record<string, string | undefined> };
-type Evidence = { env: Env; runs: Run[]; negatives: Negative[] };
-type Tier = { maxAmount: bigint; delay: number };
+const words = (s: number) => (s <= 1.05 ? "one second" : s < 10 ? `${s.toFixed(s % 1 ? 1 : 0)} seconds` : fmtS(s));
 
-type Row = {
-  orderId: Hex;
-  amount: bigint | null;
-  tier: number | null;
-  delay?: number; // the policy delay this order ran under, in seconds
-  t: { open?: number; fill?: number; seen?: number; repaid?: number }; // seconds (wall or block clock)
-  tx: { open?: Hex; fill?: Hex; react?: Hex; settle?: Hex };
-  state: "open" | "filled" | "waiting" | "repaid" | "refunded";
-  source: "bench" | "chain";
-  sortKey: number;
-};
+// ---------------------------------------------------------------- LCDs
 
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const DATA = "./data";
-const ORIGIN_EVENTS = [
-  parseAbiItem("event Opened(bytes32 indexed orderId, address indexed user, (address inputToken, uint256 inputAmount, address outputToken, uint256 outputAmount, address recipient, uint256 destinationChainId, address destinationSettler, uint32 fillDeadline) order)"),
-  parseAbiItem("event Settled(bytes32 indexed orderId, address indexed repayTo, uint256 amount)"),
-  parseAbiItem("event Refunded(bytes32 indexed orderId, address indexed user, uint256 amount)"),
-];
-const DEST_EVENTS = [parseAbiItem("event Filled(bytes32 indexed orderId, address indexed solver, bytes32 orderHash, address repayTo, uint32 fillTime)")];
-const LASNA_EVENTS = [
-  parseAbiItem("event FillAccepted(bytes32 indexed orderId, address repayTo, uint32 fillTime, uint32 settleDelay)"),
-  parseAbiItem("event SettlementRequested(bytes32 indexed orderId, address repayTo)"),
-];
-const TIERS_ABI = [{ type: "function", name: "tiers", stateMutability: "view", inputs: [], outputs: [{ type: "tuple[]", components: [{ name: "maxAmount", type: "uint256" }, { name: "delay", type: "uint32" }] }] }] as const;
-
-// Each leg uses its most RPC-independent clock; `fallback` covers runs recorded before that field existed.
-const LEGS: Array<{ key: string; fallback?: string; name: string; sub: string; policy?: boolean }> = [
-  { key: "fillToSettle_s", fallback: "fillToSettle_ms", name: "Fill → solver repaid", sub: "Reactive settlement · chain block times", policy: true },
-  { key: "fullBase_ms", fallback: "full_ms", name: "Open → repaid", sub: "full loop · counted in Base blocks (200 ms)" },
-  { key: "openToFill_ms", name: "Open → fill", sub: "solver picks up and fills · solver's receipt" },
-  { key: "reactToSettle_s", fallback: "reactToSettle_ms", name: "Settle request → repaid", sub: "callback lands on Base · chain block times" },
-  { key: "fillToReact_ms", name: "Fill → seen on Lasna", sub: "as an observer saw it via public RPC · upper bound" },
-];
-/** A segment's stat in milliseconds, from `*_s` (seconds) or `*_ms` keys. */
-function statMs(run: Run, key: string, fallback?: string): Stat | undefined {
-  const pick = run.summary[key]?.n ? key : fallback && run.summary[fallback]?.n ? fallback : undefined;
-  if (!pick) return undefined;
-  const s = run.summary[pick];
-  const k = pick.endsWith("_s") ? 1000 : 1;
-  return { n: s.n, min: s.min * k, p50: s.p50 * k, p95: s.p95 * k, max: s.max * k };
+const loadedAt = performance.now();
+function tickLcds() {
+  if (!scene) return;
+  const left = 7200 - (performance.now() - loadedAt) / 1000;
+  scene.lcdLeft.set(hms(Math.max(0, left)), { caption: "ACROSS" });
+  if (replaying) return;
+  const st = statMs(store.latestRun(0), LEGS.fillToRepaid);
+  // Idle, the right clock shows the recorded median: labelled P50, never LIVE.
+  scene.lcdRight.set(st ? hms(st.p50 / 1000) : "-:--:--", { caption: "SNAPSETTLE · P50" });
 }
 
-// ---------------------------------------------------------------- formatting
+// ---------------------------------------------------------------- notes pinned to the object
 
-const fmtS = (s: number | null | undefined) => {
-  if (s === null || s === undefined || !Number.isFinite(s)) return "—";
-  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)} s`;
-  const m = Math.floor(s / 60);
-  const r = Math.round(s % 60);
-  return `${m}:${String(r).padStart(2, "0")}`;
-};
-/** Cross-chain block clocks differ by about ±1 s: a difference under a second reads "<1 s", never negative. */
-const crossChain = (s: number | undefined) => (s === undefined || !Number.isFinite(s) ? "—" : s < 1 ? "<1 s" : fmtS(s));
-const fmtUsdc = (a: bigint | null) => (a === null ? "—" : (Number(a) / 1e6).toLocaleString("en-US", { maximumFractionDigits: 6 }));
-const short = (h?: string | null) => (h ? `${h.slice(0, 6)}…${h.slice(-4)}` : "—");
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+function renderNotes() {
+  const a = store.config.addresses;
+  const run0 = store.latestRun(0);
+  const f = statMs(run0, LEGS.fillToRepaid);
+  const full = statMs(run0, LEGS.full);
+  const o2f = statMs(run0, LEGS.openToFill);
+  const f2s = statMs(run0, LEGS.fillToSeen);
+  const r2r = statMs(run0, LEGS.requestToRepaid);
+  const pp = (s?: { p50: number; p95: number }, cross = false) =>
+    s ? `p50 <b>${cross ? crossChain(s.p50 / 1000) : fmtS(s.p50 / 1000)}</b> · p95 <b>${cross ? crossChain(s.p95 / 1000) : fmtS(s.p95 / 1000)}</b>` : "not measured yet";
+  const where = store.env === "live" ? "live loops" : "local loops";
 
-// ---------------------------------------------------------------- state
+  note("across", "lcdLeft", "hero", -150, -118, `<span class="k">Across</span> default challenge period<br><b>2 h</b> before a relayer is repaid · <a href="${ACROSS_DOCS}" target="_blank" rel="noopener">docs</a>`);
+  note("snap", "lcdRight", "hero", 120, -132, `<span class="k">Snapsettle</span> fill → solver repaid<br>${pp(f, true)} · ${f?.n ?? 0} ${where}`);
 
-const params = new URLSearchParams(location.search);
-let env: Env = (params.get("env") as Env) === "local" ? "local" : "live";
-let config: Config;
-let evidence: Evidence;
-let tiers: Tier[] = [];
-let activeTier = 0;
-let openRow: Hex | null = null;
-const chainRows = new Map<string, Row>();
-let clients: { origin: PublicClient; dest: PublicClient; lasna: PublicClient } | null = null;
-let pollTimer: number | undefined;
-const clock = mountClock($("clock"));
+  note("escrow", "chipEscrow", "open", -30, 170, `<span class="k">OriginEscrow</span> · Base Sepolia<br>${link("origin", "address", a.escrow)} holds the user's USDC`);
+  note("resolver", "chipResolver", "open", -60, -130, `<span class="k">SnapsettleResolver</span> · ERC-7683<br>${link("origin", "address", a.resolver)} tells any solver how to fill`, true);
+  note("settler", "chipSettler", "open", 40, -150, `<span class="k">DestinationSettler</span> · Unichain Sepolia<br>${link("dest", "address", a.destinationSettler)} records the fill`);
+  note("reactive", "chipReactive", "open", 30, -150, `<span class="k">SnapsettleReactive</span> · Lasna<br>${link("lasna", "address", a.reactive)} checks the fill, calls back`);
 
-async function loadJson<T>(path: string): Promise<T | null> {
-  try {
-    const r = await fetch(path, { cache: "no-store" });
-    return r.ok ? ((await r.json()) as T) : null;
-  } catch {
-    return null;
-  }
+  note("leg0", "trace0", "loop", -60, -190, `<span class="k">open → fill</span><br>${pp(o2f)} · solver's receipt`);
+  note("leg1", "trace1", "loop", 40, -150, `<span class="k">fill → seen on Lasna</span><br>${pp(f2s, true)} · observer, upper bound`);
+  note("leg2", "trace2", "loop", -80, 80, `<span class="k">settle request → repaid</span><br>${pp(r2r, true)} · block times`);
+  note("legFull", "chipReactive", "loop", 20, 150, `<span class="k">open → repaid, whole loop</span><br>${pp(full)} · counted in Base blocks`);
+
+  const delays = store.tiers.map((t) => (t.delay === 0 ? "0 s" : `${t.delay} s`)).join(" / ") || "—";
+  note("dip", "dip", "tiers", 40, 120, `<span class="k">Finality tier</span> · per order<br>${delays} · <code>estimatedDelaySeconds</code>`);
+  note("cron", "crystal", "tiers", -40, -110, `<span class="k">Cron10</span> drains delayed settlements<br>at most 3 per tick, under the 900k gas cap`, true);
+
+  const neg = latestNegatives();
+  const wrong = neg.find((n) => /wrong|terms/i.test(n.name));
+  note("reject", "chipReactive", "refuse", -40, -150, wrong
+    ? `<span class="k">FillRejected</span> · terms hash mismatch<br>no callback · ${Object.entries(wrong.tx).filter(([k]) => /reject/i.test(k)).map(([, v]) => link("lasna", "tx", v)).join(" ") || "on Lasna"}`
+    : `<span class="k">FillRejected</span> · terms hash mismatch<br>no callback · contract tests, live run pending`);
 }
 
-const tx = (chain: "origin" | "dest" | "lasna", hash?: string) => {
-  if (!hash) return "—";
-  const base = config.explorers[chain];
-  return base ? `<a href="${base}/tx/${hash}" target="_blank" rel="noopener">${short(hash)}</a>` : `<span class="mono">${short(hash)}</span>`;
-};
-const addrLink = (chain: "origin" | "dest" | "lasna", a: string | null) => {
-  if (!a) return "not deployed";
-  const base = config.explorers[chain];
-  return base ? `<a href="${base}/address/${a}" target="_blank" rel="noopener">${short(a)}</a>` : `<span class="mono">${short(a)}</span>`;
-};
-
-function tierOf(amount: bigint | null): number | null {
-  if (amount === null || !tiers.length) return null;
-  const i = tiers.findIndex((t) => amount <= t.maxAmount);
-  return i === -1 ? tiers.length - 1 : i;
+function latestNegatives() {
+  const m = new Map<string, (typeof store.evidence.negatives)[number]>();
+  for (const n of store.evidence.negatives) m.set(n.name, n);
+  return [...m.values()];
 }
 
-// ---------------------------------------------------------------- render: env switch, notice
+// ---------------------------------------------------------------- chapters
 
-function renderEnvSwitch(available: Env[]) {
-  const nav = $("env-switch");
-  nav.innerHTML = "";
-  for (const e of available) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.innerHTML = e === "live" ? `Live<span class="long"> testnets</span>` : `Local<span class="long"> harness</span>`;
-    b.setAttribute("aria-pressed", String(e === env));
-    b.addEventListener("click", () => {
-      if (e === env) return;
-      env = e;
-      const u = new URL(location.href);
-      if (e === "local") u.searchParams.set("env", "local");
-      else u.searchParams.delete("env");
-      history.replaceState(null, "", u);
-      void boot();
-    });
-    nav.appendChild(b);
-  }
+function renderHero() {
+  const run = store.latestRun(0);
+  const f = statMs(run, LEGS.fillToRepaid);
+  $("hero-p50").textContent = f ? words(Math.max(1, f.p50 / 1000)) : "seconds";
+  const wall = run?.summary["fillToSettle_ms"];
+  $("hero-src").innerHTML = !run || !f
+    ? store.env === "live" ? "Live numbers appear here once the bench has run." : "No local bench runs yet."
+    : `${store.env === "local" ? "<b>Local harness, not Reactive Network latency.</b> " : ""}Median time from the solver's fill on Unichain Sepolia to its repayment on Base Sepolia, over ${f.n} ${store.env} loops, on the chains' own block clocks. One observer polling public RPCs saw p50 ${fmtS((wall?.p50 ?? NaN) / 1000)}, an upper bound. Across's 2-hour window is its <a href="${ACROSS_DOCS}" target="_blank" rel="noopener">documented default</a>.`;
 }
 
-function renderNotice() {
-  const n = $("notice");
-  if (env === "local") {
-    n.dataset.kind = "local";
-    n.textContent = "Local harness: three anvil chains with an emulated Reactive relay. These numbers show the loop works; they are not Reactive Network latency.";
-    n.hidden = false;
-  } else if (!config.deployed) {
-    n.dataset.kind = "live";
-    n.textContent = "Live contracts are not deployed yet. Every panel below fills from Base Sepolia, Unichain Sepolia and Lasna once they are.";
-    n.hidden = false;
-  } else {
-    n.hidden = true;
-  }
+function renderLegs() {
+  const run = store.latestRun(0);
+  const rows: Array<[string, string, ReturnType<typeof statMs>, boolean]> = [
+    ["Open → fill", "solver's own receipt", statMs(run, LEGS.openToFill), false],
+    ["Fill → seen on Lasna", "observer via public RPC, upper bound", statMs(run, LEGS.fillToSeen), true],
+    ["Settle request → repaid", "chain block times", statMs(run, LEGS.requestToRepaid), true],
+    ["Fill → solver repaid", "chain block times", statMs(run, LEGS.fillToRepaid), true],
+    ["Open → repaid", "counted in Base blocks, 200 ms each", statMs(run, LEGS.full), false],
+  ];
+  const cell = (v: number, cross: boolean) => {
+    const t = cross ? crossChain(v) : fmtS(v);
+    return t.startsWith("<") ? t.replace("<", "&lt;") : tk(Number(v.toFixed(v < 10 ? 1 : 0)), t);
+  };
+  if (put("legs", rows
+    .map(([name, how, s, cross]) => `<div class="leg"><dt>${name}<small>${how}</small></dt><dd><span>${s ? cell(s.p50 / 1000, cross) : "—"}</span><span class="p95">${s ? cell(s.p95 / 1000, cross) : "—"}</span></dd></div>`)
+    .join(""))) tickers($("legs"));
+  put("legs-src", run ? `p50 · p95 · ${run.ok}/${run.n} loops settled · run <span class="mono">${esc(run.run)}</span>` : "");
 }
 
-// ---------------------------------------------------------------- render: duel + splits
-
-function latestRun(tier: number): Run | undefined {
-  return [...evidence.runs].filter((r) => r.tier === tier && r.ok > 0).sort((a, b) => a.run.localeCompare(b.run)).pop();
-}
-
-function renderDuel() {
-  const run = latestRun(0);
-  const st = run ? statMs(run, "fillToSettle_s", "fillToSettle_ms") : undefined;
-  if (!run || !st || !Number.isFinite(st.p50)) {
-    $("snap-src").textContent = env === "live" ? "Snapsettle's face fills from live bench runs once the contracts are deployed." : "No local bench runs yet.";
-    clock.setSnap(null, null);
-    return;
-  }
-  clock.setSnap(st.p50 / 1000, st.p95 / 1000);
-  const wall = run.summary["fillToSettle_ms"];
-  const where = env === "live" ? "live loops on Base Sepolia, Unichain Sepolia and Lasna" : "loops on the local harness (emulated relay)";
-  const clockNote = run.summary["fillToSettle_s"]?.n
-    ? `measured on the chains' own block clocks (1 s resolution)${wall?.n ? `; an observer polling public RPCs saw p50 ${fmtS(wall.p50 / 1000)}, p95 ${fmtS(wall.p95 / 1000)}, an upper bound` : ""}`
-    : "measured by wall clock";
-  $("snap-src").innerHTML = `Snapsettle face: fill → solver repaid over ${st.n} ${where}, orders settled on sight, ${clockNote}. Run <span class="mono">${esc(run.run)}</span>, every order in the <a href="#sheet-h">scoresheet</a>.`;
-}
-
-function renderTierTabs() {
-  const host = $("tier-tabs");
-  host.innerHTML = "";
-  const count = tiers.length;
-  if (!count) {
-    host.innerHTML = "";
-    return;
-  }
-  for (let i = 0; i < count; i++) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.setAttribute("role", "tab");
-    b.setAttribute("aria-selected", String(i === activeTier));
-    b.textContent = tiers[i] ? (tiers[i].delay === 0 ? "On sight" : fmtS(tiers[i].delay)) : `Tier ${i}`;
-    b.addEventListener("click", () => {
-      activeTier = i;
-      renderTierTabs();
-      renderSplits();
-    });
-    host.appendChild(b);
-  }
-}
-
-function renderSplits() {
-  $("splits-loop").innerHTML = loopSvg({ open: true, fill: true, react: true, settle: true }, true);
-  const body = $("splits-body");
-  const t = tiers[activeTier];
+let activeTier = -1;
+function renderTiers(active = Math.round(state.tier)) {
+  activeTier = active;
   const MAX = 2n ** 256n - 1n;
-  const prevMax = activeTier > 0 ? tiers[activeTier - 1]?.maxAmount : undefined;
-  const range = !t ? "" : t.maxAmount === MAX ? `Orders above ${fmtUsdc(prevMax ?? 0n)} USDC` : prevMax !== undefined ? `Orders above ${fmtUsdc(prevMax)} and up to ${fmtUsdc(t.maxAmount)} USDC` : `Orders up to ${fmtUsdc(t.maxAmount)} USDC`;
-  $("tier-policy").textContent = t
-    ? `${range} settle ${t.delay === 0 ? "the moment the fill is seen" : `${fmtS(t.delay)} after the fill is seen`}. The delay is the order's finality policy, surfaced to solvers as estimatedDelaySeconds.`
-    : "";
-  const run = latestRun(activeTier);
-  if (!run) {
-    body.innerHTML = `<tr><td colspan="4" class="empty">No ${env === "live" ? "live" : "local"} bench run for this tier yet.</td></tr>`;
-    $("splits-src").textContent = "";
-    return;
-  }
-  // One fixed log scale for every bar in every tier: 0.5 s to 600 s.
-  const scale = (ms: number) => Math.max(0, Math.min(1, Math.log10(ms / 500) / Math.log10(600_000 / 500)));
-  const policyMs = (t?.delay ?? 0) * 1000;
-  body.innerHTML = LEGS.map((leg) => {
-    const s = statMs(run, leg.key, leg.fallback);
-    if (!s || !s.n) return `<tr><td><span class="leg-name">${leg.name}</span><span class="leg-sub">${leg.sub}</span></td><td class="num">—</td><td class="num">—</td><td></td></tr>`;
-    const over = leg.policy && policyMs > 0 ? ` <small>+${fmtS((s.p50 - policyMs) / 1000)} over policy</small>` : "";
-    const policyMark = leg.policy && policyMs > 0 ? `<span class="bar-policy" style="left:${(scale(policyMs) * 100).toFixed(1)}%" title="policy delay"></span>` : "";
-    return `<tr>
-      <td><span class="leg-name">${leg.name}</span><span class="leg-sub">${leg.sub}</span></td>
-      <td class="num">${fmtS(s.p50 / 1000)}${over}</td>
-      <td class="num">${fmtS(s.p95 / 1000)}</td>
-      <td class="scale"><div class="bar-track"><span class="bar-p95" style="width:${(scale(s.p95) * 100).toFixed(1)}%"></span><span class="bar-p50" style="width:${(scale(s.p50) * 100).toFixed(1)}%"></span>${policyMark}</div></td>
-    </tr>`;
-  }).join("");
-  const how = env === "live" ? "wall clock from one observer polling public RPCs every ~150 ms, so an upper bound" : "wall clock on the local harness, polled every ~150 ms";
-  $("splits-src").innerHTML = `${run.ok}/${run.n} loops settled · run <span class="mono">${esc(run.run)}</span> · ${how} · bars on one log scale, 0.5 s to 10 min`;
+  const html = store.tiers
+    .map((t, i) => {
+      const prev = i > 0 ? store.tiers[i - 1].maxAmount : undefined;
+      const range = t.maxAmount === MAX ? `above ${fmtUsdc(prev ?? 0n)} USDC` : prev !== undefined ? `${fmtUsdc(prev)}–${fmtUsdc(t.maxAmount)} USDC` : `up to ${fmtUsdc(t.maxAmount)} USDC`;
+      const run = store.latestRun(i);
+      const s = statMs(run, LEGS.fillToRepaid);
+      const v = (ms: number) => tk(Number((ms / 1000).toFixed(ms < 10000 ? 1 : 0)), crossChain(ms / 1000));
+      const measured = s ? `repaid p50 <b>${v(s.p50)}</b> · p95 <b>${v(s.p95)}</b> · ${s.n} loops` : "no run yet";
+      return `<button type="button" class="tier" role="listitem" data-i="${i}">
+        <span class="tier__delay">${t.delay === 0 ? "On sight" : `After ${fmtS(t.delay)}`}</span>
+        <span class="tier__range">${range}</span>
+        <span class="tier__m">${measured}</span>
+      </button>`;
+    })
+    .join("");
+  if (put("tier-list", html)) tickers($("tier-list"));
+  // The active tier only flips an attribute: rebuilding would replay the number tickers.
+  $("tier-list").querySelectorAll<HTMLElement>(".tier").forEach((b, i) => b.setAttribute("aria-current", String(i === active)));
 }
 
-// ---------------------------------------------------------------- render: scoresheet
-
-function benchRows(): Row[] {
-  const rows: Row[] = [];
-  for (const run of evidence.runs) {
-    const amt = BigInt(run.amount);
-    for (const l of run.loops) {
-      const s = (k: string) => (typeof l.seg[k] === "number" ? (l.seg[k] as number) / 1000 : undefined);
-      const fill = s("openToFill_ms");
-      const seen = fill !== undefined && s("fillToReact_ms") !== undefined ? fill + s("fillToReact_ms")! : undefined;
-      const repaid = fill !== undefined && s("fillToSettle_ms") !== undefined ? fill + s("fillToSettle_ms")! : undefined;
-      rows.push({
-        orderId: l.orderId, amount: amt, tier: run.tier, delay: run.tierDelay,
-        t: { open: 0, fill, seen, repaid },
-        tx: { open: l.tx.open, fill: l.tx.fill, react: l.tx.react, settle: l.tx.settle },
-        state: l.ok ? "repaid" : "waiting", source: "bench", sortKey: Date.parse(run.run.slice(-24).replace(/-(\d\d)-(\d\d)-(\d{3})Z$/, ":$1:$2.$3Z").replace(/T(\d\d)-/, "T$1:")) + l.i,
-      });
-    }
+function renderRefusals() {
+  const neg = latestNegatives();
+  const chainOf = (k: string) => (/fill/i.test(k) && !/Rejected|Accepted/.test(k) ? "dest" : /Rejected|Accepted/.test(k) ? "lasna" : "origin") as "origin" | "dest" | "lasna";
+  const items = neg.map((n) => `<li><b>${esc(n.name.charAt(0).toUpperCase() + n.name.slice(1))}</b><span>${esc(n.detail)}</span><span class="tx">${Object.entries(n.tx).filter(([, v]) => v).map(([k, v]) => `${esc(k)} ${link(chainOf(k), "tx", v)}`).join(" · ")}</span></li>`);
+  const refunds = store.evidence.refunds ?? [];
+  if (refunds.length) {
+    items.push(`<li><b>${refunds.length} unfilled orders refunded by Reactive</b><span>Our solver was down while these were open. After their deadline the user asked for a refund; Reactive's callback returned the USDC.</span><span class="tx">${refunds.slice(0, 3).map((r) => `request ${link("origin", "tx", r.requestTx)} → refund ${link("origin", "tx", r.refundTx)}`).join("<br>")}${refunds.length > 3 ? `<br>and ${refunds.length - 3} more in the evidence` : ""}</span></li>`);
   }
-  return rows;
+  const live = neg.length > 0;
+  $("refuse-note").textContent = live
+    ? "Each case below ran on the live testnets; the links are its transactions."
+    : "The unfilled-order refunds below ran live. The wrong-terms and late-fill cases are covered by the contract tests; their live run is pending.";
+  put("refusals", items.length ? items.join("") : `<li class="empty">The live refusal run is pending: wrong-terms fill, late fill, unfilled refund, refund after a valid fill. Each is covered by the contract tests.</li>`);
 }
 
+// ---------------------------------------------------------------- scoresheet
+
+let sheetAll = false;
+let openRow: string | null = null;
 function renderSheet() {
-  const merged = new Map<string, Row>();
-  for (const r of benchRows()) merged.set(r.orderId.toLowerCase(), r);
-  for (const [k, r] of chainRows) {
-    const prev = merged.get(k);
-    // A row whose Opened fell outside the scanned window has no size or start time: show it only via its bench record.
-    if (!r.tx.open && !prev) continue;
-    // A bench record carries the precise per-leg timing; the chain read only adds orders the bench did not record.
-    if (prev) continue;
-    merged.set(k, r);
-  }
-  const rows = [...merged.values()].sort((a, b) => a.sortKey - b.sortKey);
-  const body = $("sheet-body");
-  body.classList.toggle("has-open", Boolean(openRow));
-  if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="9" class="empty">${env === "live" && !config.deployed ? "Nothing yet. Each order opened on Base Sepolia is written here as a move, with its time per leg." : "No orders in the recorded runs or the recent blocks."}</td></tr>`;
-    $("sheet-note").textContent = "";
-    return;
-  }
+  const rows = store.rows();
+  const shown = sheetAll ? rows : rows.slice(0, 40);
+  const policy = (r: Row) => {
+    const d = r.delay ?? (r.tier !== null ? store.tiers[r.tier]?.delay : undefined);
+    return d === undefined ? "—" : d === 0 ? "on sight" : `after ${fmtS(d)}`;
+  };
+  const label = { open: "Open", filled: "Filled", waiting: "Queued", repaid: "Repaid", refunded: "Refunded" };
   const html: string[] = [];
-  rows.reverse().forEach((r, idx) => {
-    const no = rows.length - idx;
-    const isOpen = openRow?.toLowerCase() === r.orderId.toLowerCase();
-    const stateLabel = { open: "Open", filled: "Filled", waiting: "Queued", repaid: "Repaid", refunded: "Refunded" }[r.state];
-    const delay = r.delay ?? (() => { const i = r.tier ?? tierOf(r.amount); return i === null ? undefined : tiers[i]?.delay; })();
-    const policy = delay === undefined ? "—" : delay === 0 ? "on sight" : `after ${fmtS(delay)}`;
+  shown.forEach((r, i) => {
     const toRepaid = r.t.repaid !== undefined && r.t.fill !== undefined ? r.t.repaid - r.t.fill : undefined;
-    const over = toRepaid !== undefined && delay ? `<small class="over">+${fmtS(toRepaid - delay)}</small>` : "";
-    html.push(`<tr class="move${isOpen ? " is-open" : ""}" data-id="${r.orderId}" tabindex="0" aria-expanded="${isOpen}">
-      <td class="move-no" data-l="Move">${String(no).padStart(3, "0")}</td>
-      <td class="mono" data-l="Order">${short(r.orderId)}</td>
-      <td class="num" data-l="USDC">${fmtUsdc(r.amount)}</td>
-      <td data-l="Settles">${policy}</td>
-      <td class="num" data-l="Open → fill">${fmtS(r.t.fill)}</td>
-      <td class="num" data-l="Fill → seen">${crossChain(r.t.seen !== undefined && r.t.fill !== undefined ? r.t.seen - r.t.fill : undefined)}</td>
-      <td class="num" data-l="Fill → repaid">${crossChain(toRepaid)}${over}</td>
-      <td class="num" data-l="Total">${fmtS(r.t.repaid)}</td>
-      <td data-l="State"><span class="state" data-s="${r.state}">${stateLabel}</span></td>
+    const isOpen = openRow === r.orderId.toLowerCase();
+    const seen = r.t.seen !== undefined && r.t.fill !== undefined ? r.t.seen - r.t.fill : undefined;
+    html.push(`<tr class="row${isOpen ? " is-open" : ""}${r.source === "chain" ? " is-live" : ""}" data-id="${r.orderId}" tabindex="0" aria-expanded="${isOpen}">
+      <td class="no c-no">${String(rows.length - i).padStart(3, "0")}</td>
+      <td class="mono c-ord">${short(r.orderId)}</td>
+      <td class="num c-usdc">${fmtUsdc(r.amount)}</td>
+      <td class="c-pol">${policy(r)}</td>
+      <td class="num c-o2f">${fmtS(r.t.fill)}</td>
+      <td class="num c-f2s" title="${r.source === "bench" ? "when one observer polling public RPCs first saw it: an upper bound" : "Lasna block time"}">${crossChain(seen)}${seen !== undefined ? `<small>${r.source === "bench" ? "obs" : "blk"}</small>` : ""}</td>
+      <td class="num c-f2r">${crossChain(toRepaid)}</td>
+      <td class="num c-tot">${fmtS(r.t.repaid)}</td>
+      <td class="c-st"><span class="state" data-s="${r.state}">${label[r.state]}</span></td>
     </tr>`);
     if (isOpen) {
-      const done = { open: Boolean(r.tx.open), fill: Boolean(r.tx.fill), react: Boolean(r.tx.react), settle: Boolean(r.tx.settle) };
-      html.push(`<tr class="detail"><td colspan="9"><div class="detail__grid">
-        <div class="loop">${loopSvg(done)}</div>
-        <div class="detail__links">
-          <div><span>Opened on Base Sepolia</span><br>${tx("origin", r.tx.open)}</div>
-          <div><span>Filled on Unichain Sepolia</span><br>${tx("dest", r.tx.fill)}</div>
-          <div><span>Checked on Lasna</span><br>${tx("lasna", r.tx.react)}</div>
-          <div><span>Solver repaid on Base Sepolia</span><br>${tx("origin", r.tx.settle)}</div>
-        </div></div></td></tr>`);
+      html.push(`<tr class="detail"><td colspan="9"><ol class="detail__steps">
+        <li><span>Opened on Base Sepolia</span>${link("origin", "tx", r.tx.open)}</li>
+        <li><span>Filled on Unichain Sepolia</span>${link("dest", "tx", r.tx.fill)}</li>
+        <li><span>Checked on Lasna</span>${link("lasna", "tx", r.tx.react)}</li>
+        <li><span>Solver repaid on Base Sepolia</span>${link("origin", "tx", r.tx.settle)}</li>
+      </ol></td></tr>`);
     }
   });
-  body.innerHTML = html.join("");
+  if (put("sheet-body", html.join("") || `<tr><td colspan="9" class="empty">No orders recorded yet.</td></tr>`)) animateNewRows($("sheet-body"));
   const bench = rows.filter((r) => r.source === "bench").length;
-  const fromChain = rows.length - bench;
-  $("sheet-note").textContent = `${rows.length} moves · ${bench} from recorded bench runs${fromChain > 0 ? `, ${fromChain} read from recent blocks` : ""} · fill → seen and fill → repaid count from the fill, +N is time over the order's policy delay · select a move for its transactions`;
+  $("sheet-note").textContent = `${rows.length} orders · ${bench} from recorded bench runs${rows.length > bench ? `, ${rows.length - bench} read live from recent blocks` : ""} · fill → seen is "obs" (one observer's polling, an upper bound) or "blk" (Lasna block time) · select a row for its transactions`;
+  renderTape(rows);
+  const more = $("sheet-more");
+  more.hidden = sheetAll || rows.length <= 40;
 }
 
-function loopSvg(d: { open: boolean; fill: boolean; react: boolean; settle: boolean }, legs = false) {
-  // One loop geometry: Base → Unichain → Lasna → Base.
-  const n = [
-    { x: 30, y: 70, label: "Base", on: d.open },
-    { x: 110, y: 18, label: "Unichain", on: d.fill },
-    { x: 190, y: 70, label: "Lasna", on: d.react },
-  ];
-  const edge = (a: (typeof n)[0], b: (typeof n)[0], on: boolean) => `<line class="edge${on ? " done" : ""}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;
-  return `<svg viewBox="${legs ? "-34 -14 288 134" : "0 -14 220 128"}" role="img" aria-label="${legs ? "The loop: open on Base, fill on Unichain, check on Lasna, repay on Base" : "Order progress around the loop"}">
-    ${edge(n[0], n[1], d.fill)}${edge(n[1], n[2], d.react)}<path class="edge${d.settle ? " done" : ""}" d="M190 70 Q110 120 30 70"/>
-    ${n.map((p) => `<circle class="node${p.on ? " done" : ""}" cx="${p.x}" cy="${p.y}" r="9"/><text x="${p.x}" y="${p.y + (p.y < 40 ? -14 : 26)}" text-anchor="middle">${p.label}</text>`).join("")}
-    <circle class="node${d.settle ? " done" : ""}" cx="30" cy="70" r="5"/>
-    ${legs ? `<text class="leg" x="58" y="36" text-anchor="end">open → fill</text><text class="leg" x="162" y="36">fill → seen</text><text class="leg" x="110" y="112" text-anchor="middle">repaid</text>` : ""}
-  </svg>`;
+let tapeKey = "";
+function renderTape(rows: Row[]) {
+  const done = rows.filter((r) => r.state === "repaid" && r.tx.settle && r.t.fill !== undefined && r.t.repaid !== undefined).slice(0, 18);
+  const key = done.map((r) => r.orderId).join();
+  if (key === tapeKey) return;
+  tapeKey = key;
+  const policy = (r: Row) => {
+    const d = r.delay ?? (r.tier !== null ? store.tiers[r.tier]?.delay : undefined);
+    return d === undefined ? "" : d === 0 ? "ON SIGHT" : `AFTER ${fmtS(d).toUpperCase()}`;
+  };
+  marquee($("tape"), done.map((r) => `<b>${short(r.orderId)}</b><span>${policy(r)}</span><span>FILL → REPAID ${crossChain(r.t.repaid! - r.t.fill!).toUpperCase()}</span>${link("origin", "tx", r.tx.settle, "SETTLE TX")}`));
 }
 
-$("sheet-body").addEventListener("click", (e) => {
-  const tr = (e.target as HTMLElement).closest("tr.move") as HTMLElement | null;
-  if (!tr) return;
-  const id = tr.dataset.id as Hex;
-  openRow = openRow === id ? null : id;
+function toggleRow(id: string) {
+  openRow = openRow === id.toLowerCase() ? null : id.toLowerCase();
   renderSheet();
+  document.querySelector<HTMLElement>(`tr.row[data-id="${id}"]`)?.focus();
+}
+
+// ---------------------------------------------------------------- top bar and close
+
+function renderHeads() {
+  const names = { origin: "Base", dest: "Unichain", lasna: "Lasna" } as const;
+  const host = $("heads");
+  if (!host.children.length) {
+    host.innerHTML = (Object.keys(names) as Array<keyof typeof names>).map((k) => `<li data-c="${k}"><i aria-hidden="true"></i>${names[k]} <b>…</b></li>`).join("");
+  }
+  for (const k of Object.keys(names) as Array<keyof typeof names>) {
+    const h = store.heads[k];
+    const li = host.querySelector<HTMLElement>(`[data-c="${k}"]`)!;
+    if (!h) continue;
+    li.dataset.ok = String(h.ok);
+    const b = li.querySelector("b")!;
+    const v = `#${h.block.toLocaleString("en-US")}`;
+    if (b.textContent !== v) b.textContent = v;
+  }
+}
+
+function renderEnv() {
+  const nav = $("env");
+  if (store.envs.length < 2) {
+    nav.innerHTML = "";
+    return;
+  }
+  nav.innerHTML = store.envs.map((e) => `<button type="button" data-env="${e}" aria-pressed="${e === store.env}">${e === "live" ? "Live" : "Local"}</button>`).join("");
+}
+
+function renderClose() {
+  const a = store.config.addresses;
+  put("close-cols", `
+    <div><h3>Contracts</h3><ul>
+      <li>OriginEscrow · Base Sepolia ${link("origin", "address", a.escrow)}</li>
+      <li>SnapsettleResolver · Base Sepolia ${link("origin", "address", a.resolver)}</li>
+      <li>DestinationSettler · Unichain Sepolia ${link("dest", "address", a.destinationSettler)}</li>
+      <li>SnapsettleReactive · Lasna ${link("lasna", "address", a.reactive)}</li>
+    </ul></div>
+    <div><h3>Sources</h3><ul>
+      <li><a href="${ACROSS_DOCS}" target="_blank" rel="noopener">Across: default challenge period</a></li>
+      <li><a href="https://blog.reactive.network/intents-solvers-and-borrowed-certainty/" target="_blank" rel="noopener">Reactive: Intents, Solvers, and Borrowed Certainty</a></li>
+      <li><a href="https://eips.ethereum.org/EIPS/eip-7683" target="_blank" rel="noopener">ERC-7683, resolver-centric draft</a></li>
+      <li><a href="${REPO}" target="_blank" rel="noopener">Source code and evidence</a></li>
+    </ul></div>
+    <div><h3>How this is measured</h3><ul>
+      <li>Every time on this page comes from transactions it links to. Where one observer's polling sets a time (when Lasna saw a fill), it is marked as an upper bound.</li>
+      <li>Testnets only. The solver is our own bot running a generic ERC-7683 fill.</li>
+      <li>Built for the Reactive Omni Buildathon, track Every Second Counts.</li>
+    </ul></div>`);
+}
+
+function renderAll() {
+  renderHero();
+  renderLegs();
+  renderTiers(activeTier < 0 ? 0 : activeTier);
+  renderRefusals();
+  renderSheet();
+  renderEnv();
+  renderClose();
+  if (scene) renderNotes();
+  tickLcds();
+}
+
+// ---------------------------------------------------------------- replay a real loop, and live settlements
+
+function stepsHtml(active: number, t: number[], tx: Record<string, string | undefined>) {
+  const steps: Array<[string, "origin" | "dest" | "lasna", string | undefined]> = [
+    ["Opened on Base Sepolia", "origin", tx.open],
+    ["Filled on Unichain Sepolia", "dest", tx.fill],
+    ["Seen and checked on Lasna", "lasna", tx.react],
+    ["Solver repaid on Base Sepolia", "origin", tx.settle],
+  ];
+  return steps
+    // The Lasna time is when one observer first saw it, an upper bound; the chain's own order is fill → seen → repaid.
+    .map(([name, c, h], i) => `<li data-on="${i <= active}"><span class="verify__t">${i === 2 && t[2] >= t[3] ? `&lt;+${t[3].toFixed(1)}` : `+${t[i].toFixed(1)}`} s</span><span>${name}</span>${link(c, "tx", h)}</li>`)
+    .join("");
+}
+
+function openPanel(title: string, badge: "live" | "replay") {
+  $("verify-title").textContent = title;
+  $("verify-badge").textContent = badge === "live" ? "Live on testnet" : "Replay of a recorded loop";
+  $("verify-badge").dataset.kind = badge;
+  $("verify-src").textContent = "";
+  $("verify").hidden = false;
+}
+
+async function replay() {
+  const r = store.replayLoop();
+  openPanel("A recorded loop, replayed at its real speed", "replay");
+  if (!r) {
+    $("verify-steps").innerHTML = `<li>No recorded loop to replay yet.</li>`;
+    return;
+  }
+  if (replaying) return;
+  replaying = true;
+  const { loop, run } = r;
+  const d0 = loop.seg.openToFill_ms as number;
+  const total = loop.seg.fullBase_ms as number;
+  // Pacing only: the pulse reaches Lasna before the repay, whatever the observer's lag was.
+  const d1 = Math.max(200, Math.min((loop.seg.fillToReact_ms as number) ?? 1000, total - d0 - 600));
+  const d2 = Math.max(300, total - d0 - d1);
+  const marks = [0, d0 / 1000, (d0 + ((loop.seg.fillToReact_ms as number) ?? d1)) / 1000, total / 1000];
+  $("verify-steps").innerHTML = stepsHtml(0, marks, loop.tx);
+  $("verify-src").innerHTML = `Order ${short(loop.orderId)}, the median full loop of run <span class="mono">${esc(run.run)}</span>. Total counted in Base blocks; the Lasna step is when one observer first saw it, an upper bound.`;
+  state.rocker = -1;
+  const t0 = performance.now();
+  let raf = 0;
+  const count = () => {
+    scene?.lcdRight.set(hms((performance.now() - t0) / 1000, true), { caption: `REPLAY · ${loop.orderId.slice(2, 6).toUpperCase()}` });
+    raf = requestAnimationFrame(count);
+  };
+  count();
+  const done = (s: number) => ($("verify-steps").innerHTML = stepsHtml(s, marks, loop.tx));
+  if (scene) await scene.pulse([d0, d1, d2], (i) => done(i + 1 > 3 ? 3 : i + (i > 0 ? 1 : 0)));
+  else await new Promise((res) => setTimeout(res, total));
+  cancelAnimationFrame(raf);
+  done(3);
+  state.rocker = 1;
+  scene?.lcdRight.set(hms(total / 1000, true), { caption: `REPLAY · ${loop.orderId.slice(2, 6).toUpperCase()}` });
+  setTimeout(() => {
+    replaying = false;
+    tickLcds();
+  }, 4000);
+}
+
+function liveSettled(_id: Hex) {
+  // A settlement the live tracker is not following (e.g. it opened before this page loaded): press the rocker.
+  if (replaying) return;
+  state.rocker = -1;
+  setTimeout(() => (state.rocker = 1), 380);
+  scene?.legPulse(2);
+}
+
+// ---------------------------------------------------------------- events
+
+$("verify-btn").addEventListener("click", () => void replay());
+$("own-btn").addEventListener("click", () => void openOwnOrder());
+$("demo-btn").addEventListener("click", () => void runDemoOrder());
+$("verify-x").addEventListener("click", () => {
+  $("verify").hidden = true;
+  $("own-btn").focus();
+});
+addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("verify").hidden) $("verify-x").click();
+});
+$("sheet-body").addEventListener("click", (e) => {
+  if ((e.target as HTMLElement).closest("a")) return;
+  const tr = (e.target as HTMLElement).closest<HTMLElement>("tr.row");
+  if (tr) toggleRow(tr.dataset.id!);
 });
 $("sheet-body").addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== " ") return;
-  const tr = (e.target as HTMLElement).closest("tr.move") as HTMLElement | null;
+  const tr = (e.target as HTMLElement).closest<HTMLElement>("tr.row");
   if (!tr) return;
   e.preventDefault();
-  const id = tr.dataset.id as Hex;
-  openRow = openRow === id ? null : id;
-  renderSheet();
-  (document.querySelector(`tr.move[data-id="${id}"]`) as HTMLElement | null)?.focus();
+  toggleRow(tr.dataset.id!);
 });
-
-// ---------------------------------------------------------------- render: refusals + footer
-
-function renderChecks() {
-  const latest = new Map<string, Negative>();
-  for (const n of evidence.negatives) latest.set(n.name, n);
-  const host = $("checks");
-  if (!latest.size) {
-    host.innerHTML = `<li class="empty">No ${env} negative-case run recorded yet: wrong-terms fill, late fill, unfilled refund, refund after a valid fill.</li>`;
-    return;
-  }
-  const chainOf = (k: string): "origin" | "dest" | "lasna" => (/fill/i.test(k) && !/Rejected|Accepted/.test(k) ? "dest" : /Rejected|Accepted/.test(k) ? "lasna" : "origin");
-  host.innerHTML = [...latest.values()].map((n) => `<li>
-      <b>${esc(n.name.charAt(0).toUpperCase() + n.name.slice(1))} <span class="verdict" data-v="${n.pass ? "pass" : "fail"}">${n.pass ? "held" : "failed"}</span></b>
-      <span>${esc(n.detail)}</span>
-      <span class="links">${Object.entries(n.tx).filter(([, v]) => v).map(([k, v]) => `${esc(k)} ${tx(chainOf(k), v)}`).join(" · ")}</span>
-    </li>`).join("");
-}
-
-function renderFoot() {
-  const a = config.addresses;
-  $("foot").innerHTML = `
-    <div><h3>Contracts</h3><ul>
-      <li>OriginEscrow, Base Sepolia: ${addrLink("origin", a.escrow)}</li>
-      <li>SnapsettleResolver (ERC-7683), Base Sepolia: ${addrLink("origin", a.resolver)}</li>
-      <li>DestinationSettler, Unichain Sepolia: ${addrLink("dest", a.destinationSettler)}</li>
-      <li>SnapsettleReactive, Lasna: ${addrLink("lasna", a.reactive)}</li>
-    </ul></div>
-    <div><h3>Sources</h3><ul>
-      <li><a href="https://docs.across.to/user-docs/how-across-works/speed" target="_blank" rel="noopener">Across docs: default challenge period</a></li>
-      <li><a href="https://blog.reactive.network/intents-solvers-and-borrowed-certainty/" target="_blank" rel="noopener">Reactive: Intents, Solvers, and Borrowed Certainty</a></li>
-      <li><a href="https://eips.ethereum.org/EIPS/eip-7683" target="_blank" rel="noopener">ERC-7683 (Draft)</a></li>
-    </ul></div>
-    <div><h3>How to read this</h3><ul>
-      <li>Every time is measured from transactions listed on this page; nothing is estimated.</li>
-      <li>Testnet only. The solver is our own bot running a generic ERC-7683 fill.</li>
-    </ul></div>`;
-}
-
-// ---------------------------------------------------------------- live chain reads
-
-const blockTs = new Map<string, number>();
-async function ts(c: PublicClient, chain: string, block: bigint): Promise<number> {
-  const h = heads[chain];
-  if (BLOCK_MS[chain] && h) return h.ts - (Number(h.block - block) * BLOCK_MS[chain]) / 1000;
-  const k = `${chain}:${block}`;
-  let v = blockTs.get(k);
-  for (let i = 0; v === undefined && i < 6; i++) {
-    try {
-      v = Number((await c.getBlock({ blockNumber: block })).timestamp);
-      blockTs.set(k, v);
-    } catch {
-      await new Promise((r) => setTimeout(r, 300 * (i + 1)));
-    }
-  }
-  if (v === undefined) throw new Error(`block ${block} unavailable`);
-  return v;
-}
-
-const cursors: Record<string, bigint> = {};
-const heads: Record<string, { block: bigint; ts: number }> = {};
-// Base Sepolia makes a block every 200 ms and Unichain Sepolia every 1 s (both measured on-chain), so their block
-// times follow from the block number without one RPC call per block. Lasna (~1.04 s) is fetched.
-const BLOCK_MS: Record<string, number> = { origin: 200, dest: 1000 };
-async function pollChain(name: "origin" | "dest" | "lasna", address: Address | null, events: readonly ReturnType<typeof parseAbiItem>[], lookback: bigint) {
-  const c = clients![name];
-  const head = await c.getBlockNumber();
-  const latest = await c.getBlock({ blockNumber: head });
-  heads[name] = { block: head, ts: Number(latest.timestamp) };
-  const light = document.querySelector(`[data-chain="${name}"]`);
-  if (light) {
-    const age = Date.now() / 1000 - Number(latest.timestamp);
-    light.querySelector(".light")!.setAttribute("data-state", age < 30 ? "ok" : "stale");
-    light.querySelector("b")!.textContent = `#${head.toLocaleString("en-US")}`;
-  }
-  if (!address) return [];
-  // sepolia.base.org rejects eth_getLogs wider than 200 blocks (HTTP 413); the others accept more.
-  const span = name === "origin" ? 190n : 500n;
-  type L = { eventName: string; args: Record<string, unknown>; blockNumber: bigint; transactionHash: Hex };
-  const out: L[] = [];
-  let from = cursors[name] ?? (head > lookback ? head - lookback : 0n);
-  for (let i = 0; i < 12 && head > from; i++) {
-    const to = head - from > span ? from + span : head;
-    out.push(...((await c.getLogs({ address, events: events as never, fromBlock: from + 1n, toBlock: to })) as unknown as L[]));
-    from = to;
-  }
-  // Re-scan the last few blocks next time: a load-balanced RPC can report a head its log index has not reached.
-  cursors[name] = from > 10n ? from - 10n : 0n;
-  return out;
-}
-
-function rowFor(id: Hex): Row {
-  const k = id.toLowerCase();
-  let r = chainRows.get(k);
-  if (!r) {
-    r = { orderId: id, amount: null, tier: null, t: {}, tx: {}, state: "open", source: "chain", sortKey: Date.now() };
-    chainRows.set(k, r);
-  }
-  return r;
-}
-
-let polling = false;
-async function prefetchTs(c: PublicClient, chain: string, blocks: bigint[]) {
-  const todo = [...new Set(blocks.map(String))].filter((b) => !blockTs.has(`${chain}:${b}`)).map((b) => BigInt(b));
-  if (BLOCK_MS[chain]) return; // derived from the block number, nothing to fetch
-  for (let i = 0; i < todo.length; i += 4) {
-    await Promise.all(todo.slice(i, i + 4).map((b) => ts(c, chain, b).catch(() => undefined)));
-  }
-}
-
-async function poll() {
-  if (!clients || polling) return;
-  polling = true;
-  const a = config.addresses;
-  let settledNow = false;
-  try {
-    const [o, d, l] = await Promise.all([
-      pollChain("origin", a.escrow, ORIGIN_EVENTS, 3000n),
-      pollChain("dest", a.destinationSettler, DEST_EVENTS, 900n),
-      pollChain("lasna", a.reactive, LASNA_EVENTS, 900n),
-    ]);
-    await Promise.all([
-      prefetchTs(clients.origin, "origin", o.map((x) => x.blockNumber)),
-      prefetchTs(clients.dest, "dest", d.map((x) => x.blockNumber)),
-      prefetchTs(clients.lasna, "lasna", l.filter((x) => x.eventName === "FillAccepted").map((x) => x.blockNumber)),
-    ]);
-    const absolute: Record<string, { open?: number; fill?: number; seen?: number; repaid?: number }> = {};
-    if (params.has("debug")) console.info(`poll: origin ${o.length}, dest ${d.length}, lasna ${l.length}, cursors ${JSON.stringify(Object.fromEntries(Object.entries(cursors).map(([k, v]) => [k, String(v)])))}`);
-    for (const log of o) {
-      const id = log.args.orderId as Hex;
-      const r = rowFor(id);
-      const at = await ts(clients.origin, "origin", log.blockNumber);
-      if (log.eventName === "Opened") {
-        const order = log.args.order as { inputAmount: bigint };
-        r.amount = order.inputAmount;
-        r.tier = tierOf(order.inputAmount);
-        r.tx.open = log.transactionHash;
-        r.sortKey = at * 1000;
-        (absolute[id] ??= {}).open = at;
-      } else if (log.eventName === "Settled") {
-        if (!r.tx.settle) settledNow = true;
-        r.tx.settle = log.transactionHash;
-        r.state = "repaid";
-        (absolute[id] ??= {}).repaid = at;
-      } else if (log.eventName === "Refunded") {
-        r.state = "refunded";
-      }
-    }
-    for (const log of d) {
-      const id = log.args.orderId as Hex;
-      const r = rowFor(id);
-      r.tx.fill = log.transactionHash;
-      if (r.state === "open") r.state = "filled";
-      (absolute[id] ??= {}).fill = await ts(clients.dest, "dest", log.blockNumber);
-    }
-    for (const log of l) {
-      const id = log.args.orderId as Hex;
-      const r = rowFor(id);
-      if (log.eventName === "FillAccepted") {
-        r.tx.react = log.transactionHash;
-        if (r.state !== "repaid" && Number(log.args.settleDelay) > 0) r.state = "waiting";
-        (absolute[id] ??= {}).seen = await ts(clients.lasna, "lasna", log.blockNumber);
-      }
-    }
-    // Store absolute block times, then express them relative to the open (block clocks, 1 s granularity).
-    for (const [id, abs] of Object.entries(absolute)) {
-      const r = rowFor(id as Hex);
-      const rec = ((r as Row & { abs?: Record<string, number> }).abs ??= {});
-      Object.assign(rec, abs);
-      if (rec.open !== undefined) {
-        r.t = {
-          open: 0,
-          fill: rec.fill !== undefined ? rec.fill - rec.open : r.t.fill,
-          seen: rec.seen !== undefined ? rec.seen - rec.open : r.t.seen,
-          repaid: rec.repaid !== undefined ? rec.repaid - rec.open : r.t.repaid,
-        };
-      }
-    }
-  } catch (e) {
-    console.warn("poll failed:", (e as Error).message?.split("\n")[0]);
-    document.querySelectorAll("[data-chain] .light").forEach((x) => x.getAttribute("data-state") === "ok" || x.setAttribute("data-state", "down"));
-  }
-  polling = false;
+$("sheet-more").addEventListener("click", () => {
+  sheetAll = true;
   renderSheet();
-  if (settledNow) clock.press();
-}
+});
+$("tier-list").addEventListener("click", (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>(".tier");
+  if (b && story) goTo(story.tierScroll(Number(b.dataset.i)));
+});
+$("env").addEventListener("click", (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>("[data-env]");
+  if (!b || b.dataset.env === store.env) return;
+  const u = new URL(location.href);
+  if (b.dataset.env === "local") u.searchParams.set("env", "local");
+  else u.searchParams.delete("env");
+  history.replaceState(null, "", u);
+  void store.boot(b.dataset.env as Env);
+});
+document.querySelectorAll<HTMLAnchorElement>('a[href^="#"]').forEach((a) =>
+  a.addEventListener("click", (e) => {
+    e.preventDefault();
+    goTo(a.getAttribute("href")!);
+  }),
+);
 
-function renderChains() {
-  const names = { origin: "Base Sepolia", dest: "Unichain Sepolia", lasna: "Lasna" } as const;
-  $("chains").innerHTML = (Object.keys(names) as Array<keyof typeof names>)
-    .map((k) => `<li data-chain="${k}"><span class="light" data-state="${config.deployed || env === "local" ? "stale" : "stale"}"></span>${names[k]} <b>…</b></li>`)
-    .join("");
+/** Headline lines rise out of a mask once the scene has arrived. */
+function revealHero() {
+  const lines = document.querySelectorAll<HTMLElement>(".hero__l1, .hero__l2, .hero__foot");
+  lines.forEach((el, i) => {
+    el.animate([{ transform: "translateY(36px)", opacity: 0, filter: "blur(6px)" }, { transform: "none", opacity: 1, filter: "blur(0)" }], {
+      duration: reduced ? 1 : 1300, delay: reduced ? 0 : 900 + i * 160, easing: "cubic-bezier(0.16, 1, 0.3, 1)", fill: "backwards",
+    });
+  });
 }
 
 // ---------------------------------------------------------------- boot
 
 async function boot() {
-  if (pollTimer) clearInterval(pollTimer);
-  chainRows.clear();
-  for (const k of Object.keys(cursors)) delete cursors[k];
-  openRow = null;
-  const manifest = await loadJson<{ envs: Array<{ env: Env }> }>(`${DATA}/manifest.json`);
-  const available = (manifest?.envs ?? [{ env: "live" }]).map((e) => e.env);
-  if (!available.includes(env)) env = available[0] ?? "live";
-  renderEnvSwitch(available);
-  config = (await loadJson<Config>(`${DATA}/config.${env}.json`))!;
-  evidence = (await loadJson<Evidence>(`${DATA}/evidence.${env}.json`)) ?? { env, runs: [], negatives: [] };
-  renderNotice();
-  renderChains();
-  clients = {
-    origin: createPublicClient({ transport: http(config.rpc.origin, { batch: { batchSize: 20, wait: 50 }, retryCount: 4, retryDelay: 600 }) }) as PublicClient,
-    dest: createPublicClient({ transport: http(config.rpc.dest, { batch: { batchSize: 20, wait: 50 }, retryCount: 4, retryDelay: 600 }) }) as PublicClient,
-    lasna: createPublicClient({ transport: http(config.rpc.lasna, { batch: { batchSize: 20, wait: 50 }, retryCount: 4, retryDelay: 600 }) }) as PublicClient,
+  const count = $("loader-count");
+  let shown = 0;
+  let target = 12;
+  const roll = setInterval(() => {
+    shown += Math.max(1, Math.round((target - shown) * 0.25));
+    shown = Math.min(shown, target);
+    count.textContent = String(shown).padStart(2, "0");
+  }, 40);
+
+  const dseg = new FontFace("DSEG7", `url(${dsegUrl})`, { weight: "700" });
+  document.fonts.add(dseg);
+  const fontsReady = Promise.all([
+    dseg.load(),
+    document.fonts.load('500 40px "Martian Mono Variable"'),
+    document.fonts.load('300 80px "Funnel Display Variable"'),
+  ]).catch(() => undefined);
+  await fontsReady;
+  target = 45;
+  store.on("data", renderAll);
+  store.on("heads", renderHeads);
+  store.onSettled(liveSettled);
+  renderHeads();
+  await store.boot();
+  target = 80;
+
+  const gl = webglAvailable();
+  if (gl) {
+    scene = new ClockScene($("stage"));
+    scene.onFrame = () => layoutNotes(scene!);
+    if (new URLSearchParams(location.search).has("debug")) (window as unknown as { __scene: ClockScene }).__scene = scene;
+    renderNotes();
+  } else {
+    document.documentElement.classList.add("no-gl");
+  }
+  tickLcds();
+  setInterval(tickLcds, 250);
+  target = 100;
+  await new Promise((r) => setTimeout(r, reduced ? 0 : 420));
+  clearInterval(roll);
+  count.textContent = "100";
+  document.documentElement.classList.add("is-ready");
+  $("loader").setAttribute("aria-busy", "false");
+
+  setupScroll();
+  const top = document.querySelector(".top")!;
+  const solid = () => top.classList.toggle("top--solid", scrollY > $("sheet").offsetTop - 64);
+  addEventListener("scroll", solid, { passive: true });
+  solid();
+  const build = () => {
+    story = buildStory((i) => {
+      if (i !== activeTier) renderTiers(i);
+    });
   };
-  tiers = [];
-  if (config.addresses.reactive) {
-    try {
-      tiers = [...((await clients.lasna.readContract({ address: config.addresses.reactive, abi: TIERS_ABI, functionName: "tiers" })) as readonly Tier[])];
-    } catch {
-      tiers = [];
-    }
-  }
-  if (!tiers.length && config.plannedTiers) {
-    tiers = config.plannedTiers.map((t) => ({ maxAmount: BigInt(t.maxAmount), delay: t.delay }));
-  }
-  activeTier = 0;
-  renderDuel();
-  renderTierTabs();
-  renderSplits();
-  renderChecks();
-  renderFoot();
-  renderSheet();
-  await poll();
-  pollTimer = window.setInterval(() => void poll(), env === "local" ? 1500 : 4000);
+  if (gl) intro(() => undefined);
+  headings(".ch__text h2, .sheet__head h2, .close__line");
+  magnet($("own-btn"));
+  initLive({
+    scene,
+    hms,
+    hold: (on) => {
+      replaying = on;
+      if (!on) tickLcds();
+    },
+    open: openPanel,
+    steps: (html) => ($("verify-steps").innerHTML = html),
+    note: (html) => ($("verify-src").innerHTML = html),
+  });
+  $("demo-btn").hidden = !store.config.demoApi;
+  build();
+  onResizeRebuild(build);
+  revealHero();
 }
 
 void boot();

@@ -1,0 +1,102 @@
+{
+  "env": "live",
+  "tier": 2,
+  "tierDelay": 300,
+  "tierPolicy": [
+    {
+      "maxAmount": "500000",
+      "delay": 0
+    },
+    {
+      "maxAmount": "2000000",
+      "delay": 30
+    },
+    {
+      "maxAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "delay": 300
+    }
+  ],
+  "contracts": {
+    "escrow": "0xd1724a84919F31cf733bA0E4649054D9e85b3149",
+    "reactive": "0x01f1c7dAf43D0cEb14c39B867fa79d2e673C5D06",
+    "destinationSettler": "0xd1724a84919F31cf733bA0E4649054D9e85b3149"
+  },
+  "amount": "2500000",
+  "n": 24,
+  "ok": 24,
+  "backfilled": 6,
+  "partialRun": true,
+  "note": "Run stopped early at 24 recorded loops (target 50): the observer's Base log scanner fell more than 200 blocks behind and the public RPC refused its catch-up range, so it stopped seeing events. 6 loops whose settlement it missed were completed from the chain afterwards (settleSeenBy=\"backfill\"): their block-timestamp and Base-block segments are exact; they have no wall-clock settle time. Original observer output: loops.observed.jsonl. 2 open(s) reverted on Base before an order existed (errors.jsonl).",
+  "summary": {
+    "fillToSettle_ms": {
+      "n": 18,
+      "min": 304442,
+      "p50": 309904,
+      "p95": 315320,
+      "max": 315320
+    },
+    "full_ms": {
+      "n": 18,
+      "min": 311092,
+      "p50": 319298,
+      "p95": 327699,
+      "max": 327699
+    },
+    "fullBase_ms": {
+      "n": 24,
+      "min": 306200,
+      "p50": 312800,
+      "p95": 321000,
+      "max": 323400
+    },
+    "openToFill_ms": {
+      "n": 24,
+      "min": 2536,
+      "p50": 5917,
+      "p95": 12814,
+      "max": 15181
+    },
+    "fillToReact_ms": {
+      "n": 24,
+      "min": 1659,
+      "p50": 4656,
+      "p95": 6713,
+      "max": 7014
+    },
+    "reactToSettle_ms": {
+      "n": 18,
+      "min": -2405,
+      "p50": 1720,
+      "p95": 3854,
+      "max": 3854
+    },
+    "fillToSettle_s": {
+      "n": 24,
+      "min": 301,
+      "p50": 306,
+      "p95": 310,
+      "max": 311
+    },
+    "full_s": {
+      "n": 24,
+      "min": 307,
+      "p50": 313,
+      "p95": 321,
+      "max": 323
+    },
+    "fillToReact_s": {
+      "n": 24,
+      "min": -1,
+      "p50": -1,
+      "p95": 0,
+      "max": 0
+    },
+    "reactToSettle_s": {
+      "n": 24,
+      "min": 1,
+      "p50": 2,
+      "p95": 3,
+      "max": 3
+    }
+  }
+}

@@ -48,6 +48,8 @@ for (const env of envs) {
       tokenOrigin: env === "local" ? dep(env, "token-84532", "token") : CIRCLE.origin,
       tokenDest: env === "local" ? dep(env, "token-1301", "token") : CIRCLE.dest,
     },
+    // The always-on demo service (offchain/src/demo.ts), if one is running: "Run one live order".
+    demoApi: env === "live" ? process.env.DEMO_API ?? null : null,
   };
   writeFileSync(join(out, `config.${env}.json`), JSON.stringify(config, null, 2));
 
@@ -60,7 +62,7 @@ for (const env of envs) {
       if (d.startsWith("bench-") && existsSync(sum)) {
         const s = readJson(sum);
         const loops = readFileSync(join(evDir, d, "loops.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-        runs.push({ run: d, ...s, loops: loops.map((r) => ({ i: r.i, orderId: r.orderId, ok: r.ok, seg: r.seg, tx: r.tx })) });
+        runs.push({ run: d, ...s, loops: loops.map((r) => ({ i: r.i, orderId: r.orderId, ok: r.ok, seg: r.seg, tx: r.tx, settleSeenBy: r.settleSeenBy })) });
       }
       const cases = join(evDir, d, "cases.jsonl");
       if (d.startsWith("negative-") && existsSync(cases)) {
@@ -68,7 +70,12 @@ for (const env of envs) {
       }
     }
   }
-  writeFileSync(join(out, `evidence.${env}.json`), JSON.stringify({ env, runs, negatives }, null, 2));
+  // Orders refunded through the protocol (requestRefund, then Reactive's refund callback): `pnpm recover refund`.
+  const refundsFile = join(evDir, "recovery", "refunds.jsonl");
+  const refunds = existsSync(refundsFile)
+    ? readFileSync(refundsFile, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.refundTx)
+    : [];
+  writeFileSync(join(out, `evidence.${env}.json`), JSON.stringify({ env, runs, negatives, refunds }, null, 2));
   manifest.envs.push({ env, deployed: config.deployed, runs: runs.length, negatives: negatives.length });
 }
 writeFileSync(join(out, "manifest.json"), JSON.stringify(manifest, null, 2));

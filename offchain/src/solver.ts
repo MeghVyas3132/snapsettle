@@ -74,8 +74,10 @@ async function main() {
   const seen = new Set<Hex>();
   let busy = false;
 
-  for (;;) {
-    const to = await pub.origin.getBlockNumber();
+  // A failed RPC call skips this poll; it must never stop the solver.
+  const scan = async () => {
+    const head = await pub.origin.getBlockNumber();
+    const to = head - from > 190n ? from + 190n : head; // Base Sepolia's public RPC rejects getLogs over 200 blocks
     if (to > from) {
       const logs = await pub.origin.getContractEvents({ address: addr.escrow, abi: abi.escrow, eventName: "Opened", fromBlock: from + 1n, toBlock: to });
       for (const l of logs) {
@@ -87,6 +89,10 @@ async function main() {
       }
       from = to > 10n ? to - 10n : 0n; // re-scan a few blocks: a load-balanced RPC can lag its own head
     }
+  };
+
+  for (;;) {
+    await scan().catch((e) => console.error(`scan failed, retrying: ${(e as Error).message.split("\n")[0]}`));
     if (!busy && queue.length) {
       busy = true;
       const job = queue.shift()!;

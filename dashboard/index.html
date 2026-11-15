@@ -3,75 +3,137 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Snapsettle · intents settled by Reactive</title>
-    <meta name="description" content="Live view of Snapsettle: cross-chain intents opened on Base Sepolia, filled on Unichain Sepolia and settled by a Reactive Network contract on Lasna." />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%233f2a1d'/%3E%3Ccircle cx='16' cy='17' r='9' fill='%23eeeed2'/%3E%3Cpath d='M16 17V10' stroke='%231d1a16' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M15 6h7v4h-7z' fill='%23c8322a'/%3E%3C/svg%3E" />
+    <title>Snapsettle</title>
+    <meta name="description" content="Cross-chain intents settled by Reactive Network. A solver fills on Unichain Sepolia and is repaid on Base Sepolia in about a second, checked by a Reactive contract on Lasna. Every number links to a transaction." />
+    <meta name="theme-color" content="#cdd2d8" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23cdd2d8'/%3E%3Cpath d='M6 21 L13 9 H26 V21 Z' fill='%23eef0f1' stroke='%232a2e33' stroke-width='1.6' stroke-linejoin='round'/%3E%3Crect x='9' y='7' width='14' height='2.4' rx='1.2' fill='%232a2e33'/%3E%3Ccircle cx='21' cy='16' r='2.2' fill='%23ff5a1f'/%3E%3C/svg%3E" />
   </head>
   <body>
-    <header class="bar">
-      <div class="bar__brand">
-        <span class="bar__name">Snapsettle</span>
-        <span class="bar__tag">intents settled by Reactive</span>
+    <div id="stage" class="stage" aria-hidden="true"></div>
+    <div id="scrim" class="scrim" aria-hidden="true"></div>
+    <svg id="leaders" class="leaders" aria-hidden="true"></svg>
+    <div id="notes" class="notes"></div>
+
+    <div id="loader" class="loader" role="status" aria-live="polite">
+      <span class="loader__name">Snapsettle</span>
+      <span class="loader__count" id="loader-count">00</span>
+      <span class="loader__what">reading Base Sepolia, Unichain Sepolia and Lasna</span>
+    </div>
+
+    <header class="top">
+      <a class="mark" href="#hero" aria-label="Snapsettle, back to the top">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 22 L12.5 9 H27 V22 Z" /><rect x="8.5" y="6.4" width="15" height="2.6" rx="1.3" /><circle cx="21.5" cy="16.5" r="2.3" /></svg>
+        <span>Snapsettle</span>
+      </a>
+      <p class="top__claim">Cross-chain intents, settled by Reactive</p>
+      <div class="top__right">
+        <ul class="heads" id="heads" aria-label="Latest block on each chain"></ul>
+        <nav class="env" id="env" aria-label="Data source"></nav>
       </div>
-      <nav class="bar__env" aria-label="Data source" id="env-switch"></nav>
-      <ul class="bar__chains" id="chains" aria-label="Chain status"></ul>
     </header>
 
-    <div class="notice" id="notice" hidden></div>
-
-    <main class="board">
-      <section class="duel" aria-labelledby="duel-h">
-        <h1 id="duel-h" class="duel__title">When does the solver get its money back?</h1>
-        <p class="duel__lede">A solver fills your order on Unichain from its own inventory. Snapsettle's Reactive contract sees the fill and repays the solver on Base. No challenge window.</p>
-        <div class="duel__clock" id="clock"></div>
-        <p class="duel__caption" id="snap-src">Waiting for bench data.</p>
+    <main id="story" class="story">
+      <section class="ch ch--hero" id="hero" aria-labelledby="hero-h">
+        <h1 id="hero-h" class="hero__h">
+          <span class="hero__l1">Solver repaid in <span id="hero-p50">one second</span>.</span>
+          <span class="hero__l2">The window it replaces lasts two hours.</span>
+        </h1>
+        <div class="hero__foot">
+          <p class="hero__src" id="hero-src">Reading the bench evidence…</p>
+          <div class="hero__act">
+            <button type="button" class="btn btn--primary" id="own-btn" aria-controls="verify">
+              <span class="btn__dot" aria-hidden="true"></span>Open your own order, live
+            </button>
+            <div class="hero__alt">
+              <button type="button" class="btn btn--quiet" id="demo-btn" aria-controls="verify" hidden>Run one live order</button>
+              <button type="button" class="linkish" id="verify-btn" aria-controls="verify">Replay a recorded loop</button>
+            </div>
+            <a class="cue" href="#open">Scroll to open the clock</a>
+          </div>
+        </div>
+        <div class="tape" id="tape" aria-label="Recently settled live orders" hidden></div>
       </section>
 
-      <section class="splits" aria-labelledby="splits-h">
-        <div class="splits__head">
-          <h2 id="splits-h">Leg splits</h2>
-          <div class="tabs" role="tablist" aria-label="Finality tier" id="tier-tabs"></div>
-        </div>
-        <div class="splits__intro">
-          <div class="splits__loop loop" id="splits-loop"></div>
-          <p class="splits__policy" id="tier-policy"></p>
-        </div>
-        <table class="splits__table">
-          <thead><tr><th scope="col">Leg</th><th scope="col" class="num">p50</th><th scope="col" class="num">p95</th><th scope="col" class="scale" aria-label="Scale"></th></tr></thead>
-          <tbody id="splits-body"></tbody>
-        </table>
-        <p class="splits__src" id="splits-src"></p>
-      </section>
-
-      <section class="sheet" aria-labelledby="sheet-h">
-        <div class="sheet__head">
-          <h2 id="sheet-h">Scoresheet</h2>
-          <p class="sheet__note" id="sheet-note"></p>
-        </div>
-        <div class="sheet__scroll">
-          <table class="sheet__table">
-            <thead>
-              <tr>
-                <th scope="col">Move</th><th scope="col">Order</th><th scope="col" class="num">Size</th><th scope="col">Tier</th>
-                <th scope="col" class="num" title="Open to fill on Unichain">Open → fill</th>
-                <th scope="col" class="num" title="Fill to FillAccepted on Lasna">Fill → seen</th>
-                <th scope="col" class="num" title="Fill to Settled on Base, against the tier's policy delay">Fill → repaid</th>
-                <th scope="col" class="num" title="Open to Settled">Total</th>
-                <th scope="col">State</th>
-              </tr>
-            </thead>
-            <tbody id="sheet-body"></tbody>
-          </table>
+      <section class="ch" id="open" aria-labelledby="open-h">
+        <div class="ch__text">
+          <h2 id="open-h">Open it up.</h2>
+          <p>Inside are four contracts on three chains. The user's money waits in an escrow on Base. The solver fills the order on Unichain from its own pocket. A Reactive contract on Lasna sees both events, checks the fill against the order, and calls back to Base to pay the solver.</p>
+          <p class="ch__aside">Nobody runs a relayer for this. The callback is a Reactive transaction.</p>
         </div>
       </section>
 
-      <section class="checks" aria-labelledby="checks-h">
-        <h2 id="checks-h">Refusals, on-chain</h2>
-        <ul class="checks__list" id="checks"></ul>
+      <section class="ch" id="loop" aria-labelledby="loop-h">
+        <div class="ch__text">
+          <h2 id="loop-h">Every leg, timed.</h2>
+          <p>Median and 95th percentile over the live loops of orders that settle on sight. Each time comes from the clock that is hardest to fool: the chain's own blocks where possible, the solver's own receipt for the fill.</p>
+          <dl class="legs" id="legs"></dl>
+          <p class="ch__src" id="legs-src"></p>
+        </div>
       </section>
+
+      <section class="ch" id="tiers" aria-labelledby="tiers-h">
+        <div class="ch__text">
+          <h2 id="tiers-h">Finality is a setting.</h2>
+          <p>Reactive acts on what it sees, even if a chain later reorganises. So each order carries its own policy: small ones settle on sight, larger ones wait. Solvers read the wait from our ERC-7683 resolver as <code>estimatedDelaySeconds</code>.</p>
+          <div class="tiers" id="tier-list" role="list"></div>
+        </div>
+      </section>
+
+      <section class="ch" id="refuse" aria-labelledby="refuse-h">
+        <div class="ch__text">
+          <h2 id="refuse-h">It also says no.</h2>
+          <p>A fill with the wrong terms is not paid. A late fill reverts. An order nobody fills goes back to its owner.</p>
+          <p class="ch__aside" id="refuse-note"></p>
+          <ul class="refusals" id="refusals"></ul>
+        </div>
+      </section>
+
+      <section class="ch ch--rest" id="rest" aria-hidden="true"></section>
     </main>
 
-    <footer class="foot" id="foot"></footer>
+    <section class="sheet" id="sheet" aria-labelledby="sheet-h">
+      <div class="sheet__head">
+        <h2 id="sheet-h">Every order, with its four transactions.</h2>
+        <p class="sheet__note" id="sheet-note"></p>
+      </div>
+      <div class="sheet__scroll">
+        <table class="sheet__table">
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">Order</th>
+              <th scope="col" class="num">USDC</th>
+              <th scope="col">Policy</th>
+              <th scope="col" class="num">Open → fill</th>
+              <th scope="col" class="num">Fill → seen</th>
+              <th scope="col" class="num">Fill → repaid</th>
+              <th scope="col" class="num">Total</th>
+              <th scope="col">State</th>
+            </tr>
+          </thead>
+          <tbody id="sheet-body"></tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn--quiet" id="sheet-more" hidden>Show every order</button>
+    </section>
+
+    <footer class="close" id="close">
+      <p class="close__line">Two hours, or one second.</p>
+      <div class="close__cols" id="close-cols"></div>
+    </footer>
+
+    <aside class="verify" id="verify" hidden aria-live="polite" aria-label="Order progress">
+      <div class="verify__head">
+        <div>
+          <span class="verify__badge" id="verify-badge" data-kind="live">Live on testnet</span>
+          <p class="verify__title" id="verify-title">A live order</p>
+        </div>
+        <button type="button" class="verify__x" id="verify-x" aria-label="Close">Close</button>
+      </div>
+      <ol class="verify__steps" id="verify-steps"></ol>
+      <p class="verify__src" id="verify-src"></p>
+    </aside>
+
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>
