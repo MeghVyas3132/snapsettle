@@ -20,4 +20,6 @@ Resume here. Update after every milestone.
 
 ## Blockers (owner)
 - Deployer keystore `snapsettle-deployer` (`cast wallet new` → `cast wallet import snapsettle-deployer --interactive`) + funds: Base Sepolia ETH ~0.2, Unichain Sepolia ETH ~0.1, ~1 SepETH → lREACT faucet; Circle test USDC on both chains for a user wallet and a solver wallet (faucet.circle.com).
+- The owner runs the 5 deploy commands in docs/03-deploy.md (keystore password prompt). Agents never type passwords or keys.
+- `offchain/.env` with USER_PRIVATE_KEY and SOLVER_PRIVATE_KEY for two fresh testnet wallets, created by the owner (never pasted in chat), each with Base/Unichain Sepolia ETH for gas; USDC: user on Base Sepolia, solver on Unichain Sepolia.
 - Track-fit question in t.me/reactivedevs (draft in ~/Desktop/Larp/reactive-omni-build-plan.md).

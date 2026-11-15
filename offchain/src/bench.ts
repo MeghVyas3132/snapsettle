@@ -26,10 +26,15 @@ const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const dir = evidenceDir(`bench-tier${TIER}-${stamp}`);
 const rowsFile = `${dir}/loops.jsonl`;
 
+let tierPolicy: { maxAmount: bigint; delay: number }[] = [];
 async function tierAmount(): Promise<bigint> {
   const tiers = (await pub.lasna.readContract({ address: addr.reactive, abi: abi.reactive, functionName: "tiers" })) as { maxAmount: bigint; delay: number }[];
   if (TIER >= tiers.length) throw new Error(`tier ${TIER} does not exist (${tiers.length} tiers)`);
-  const a = TIER === 0 ? (tiers[0].maxAmount / 2n || 1n) : tiers[TIER - 1].maxAmount + 1n;
+  tierPolicy = tiers;
+  // A round amount inside the tier: half the first tier, otherwise half a USDC above the previous tier's cap.
+  const prev = TIER === 0 ? 0n : tiers[TIER - 1].maxAmount;
+  const room = tiers[TIER].maxAmount - prev;
+  const a = TIER === 0 ? tiers[0].maxAmount / 2n || 1n : prev + (room / 2n < 500_000n ? room / 2n || 1n : 500_000n);
   return a;
 }
 
@@ -117,7 +122,7 @@ async function main() {
   hub.stop();
 
   const summary = summarize(rows, SEGMENTS);
-  writeJson(`${dir}/summary.json`, { env: ENV, tier: TIER, amount: amount.toString(), n: rows.length, ok: rows.filter((r) => r.ok).length, summary });
+  writeJson(`${dir}/summary.json`, { env: ENV, tier: TIER, tierDelay: tierPolicy[TIER]?.delay, tierPolicy, contracts: { escrow: addr.escrow, reactive: addr.reactive, destinationSettler: addr.destinationSettler }, amount: amount.toString(), n: rows.length, ok: rows.filter((r) => r.ok).length, summary });
   writeFileSync(`${dir}/summary.md`, renderSummaryMd(ENV, TIER, amount, rows, summary, (h) => txLink("origin", h)));
   console.log(`done: ${rows.filter((r) => r.ok).length}/${rows.length} settled; summary in ${dir}/summary.md`);
   process.exit(0);

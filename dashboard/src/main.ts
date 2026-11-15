@@ -11,11 +11,12 @@ type Config = {
   rpc: { origin: string; dest: string; lasna: string };
   chains: { origin: number; dest: number; lasna: number };
   explorers: { origin: string | null; dest: string | null; lasna: string | null };
+  plannedTiers?: Array<{ maxAmount: string; delay: number }>;
   addresses: { escrow: Address | null; destinationSettler: Address | null; reactive: Address | null; resolver: Address | null; tokenOrigin: Address | null; tokenDest: Address | null };
 };
 type Stat = { n: number; min: number; p50: number; p95: number; max: number };
 type Run = {
-  run: string; env: Env; tier: number; amount: string; n: number; ok: number;
+  run: string; env: Env; tier: number; tierDelay?: number; amount: string; n: number; ok: number;
   summary: Record<string, Stat>;
   loops: Array<{ i: number; orderId: Hex; ok: boolean; seg: Record<string, number | null>; tx: Record<string, Hex | undefined> }>;
 };
@@ -27,6 +28,7 @@ type Row = {
   orderId: Hex;
   amount: bigint | null;
   tier: number | null;
+  delay?: number; // the policy delay this order ran under, in seconds
   t: { open?: number; fill?: number; seen?: number; repaid?: number }; // seconds (wall or block clock)
   tx: { open?: Hex; fill?: Hex; react?: Hex; settle?: Hex };
   state: "open" | "filled" | "waiting" | "repaid" | "refunded";
@@ -65,7 +67,7 @@ const fmtS = (s: number | null | undefined) => {
   const r = Math.round(s % 60);
   return `${m}:${String(r).padStart(2, "0")}`;
 };
-const fmtUsdc = (a: bigint | null) => (a === null ? "—" : (Number(a) / 1e6).toLocaleString("en-US", { maximumFractionDigits: 2 }));
+const fmtUsdc = (a: bigint | null) => (a === null ? "—" : (Number(a) / 1e6).toLocaleString("en-US", { maximumFractionDigits: 6 }));
 const short = (h?: string | null) => (h ? `${h.slice(0, 6)}…${h.slice(-4)}` : "—");
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
@@ -108,10 +110,6 @@ function tierOf(amount: bigint | null): number | null {
   const i = tiers.findIndex((t) => amount <= t.maxAmount);
   return i === -1 ? tiers.length - 1 : i;
 }
-const tierLabel = (i: number | null) => {
-  if (i === null || !tiers[i]) return "—";
-  return tiers[i].delay === 0 ? "on sight" : `after ${fmtS(tiers[i].delay)}`;
-};
 
 // ---------------------------------------------------------------- render: env switch, notice
 
@@ -161,21 +159,23 @@ function renderDuel() {
   const run = latestRun(0);
   const st = run?.summary["fillToSettle_ms"];
   if (!run || !st || !Number.isFinite(st.p50)) {
-    $("snap-time").textContent = "—";
-    $("snap-src").textContent = env === "live" ? "No live bench runs yet" : "No local bench runs yet";
-    clock.setSnap(null);
+    $("snap-src").textContent = env === "live" ? "Snapsettle's face fills from live bench runs once the contracts are deployed." : "No local bench runs yet.";
+    clock.setSnap(null, null);
     return;
   }
-  const p50 = st.p50 / 1000;
-  $("snap-time").textContent = fmtS(p50);
-  $("snap-src").innerHTML = `p95 ${fmtS(st.p95 / 1000)} · ${st.n} ${env === "live" ? "live" : "local"} loops, ${tierLabel(0)} tier · <a href="#sheet-h">scoresheet</a>`;
-  clock.setSnap(p50);
+  clock.setSnap(st.p50 / 1000, st.p95 / 1000);
+  const where = env === "live" ? "live loops on Base Sepolia, Unichain Sepolia and Lasna" : "loops on the local harness (emulated relay)";
+  $("snap-src").innerHTML = `Snapsettle face: fill → solver repaid, median and p95 over ${st.n} ${where}, orders settled on sight. Run <span class="mono">${esc(run.run)}</span>, every order in the <a href="#sheet-h">scoresheet</a>.`;
 }
 
 function renderTierTabs() {
   const host = $("tier-tabs");
   host.innerHTML = "";
-  const count = Math.max(tiers.length, 1);
+  const count = tiers.length;
+  if (!count) {
+    host.innerHTML = "";
+    return;
+  }
   for (let i = 0; i < count; i++) {
     const b = document.createElement("button");
     b.type = "button";
@@ -192,6 +192,7 @@ function renderTierTabs() {
 }
 
 function renderSplits() {
+  $("splits-loop").innerHTML = loopSvg({ open: true, fill: true, react: true, settle: true }, true);
   const body = $("splits-body");
   const t = tiers[activeTier];
   const MAX = 2n ** 256n - 1n;
@@ -221,7 +222,8 @@ function renderSplits() {
       <td class="scale"><div class="bar-track"><span class="bar-p95" style="width:${(scale(s.p95) * 100).toFixed(1)}%"></span><span class="bar-p50" style="width:${(scale(s.p50) * 100).toFixed(1)}%"></span>${policyMark}</div></td>
     </tr>`;
   }).join("");
-  $("splits-src").innerHTML = `${run.ok}/${run.n} loops settled · run <span class="mono">${esc(run.run)}</span> · wall clock from one observer polling public RPCs every ~150 ms, so an upper bound · bars on one log scale, 0.5 s to 10 min`;
+  const how = env === "live" ? "wall clock from one observer polling public RPCs every ~150 ms, so an upper bound" : "wall clock on the local harness, polled every ~150 ms";
+  $("splits-src").innerHTML = `${run.ok}/${run.n} loops settled · run <span class="mono">${esc(run.run)}</span> · ${how} · bars on one log scale, 0.5 s to 10 min`;
 }
 
 // ---------------------------------------------------------------- render: scoresheet
@@ -236,7 +238,7 @@ function benchRows(): Row[] {
       const seen = fill !== undefined && s("fillToReact_ms") !== undefined ? fill + s("fillToReact_ms")! : undefined;
       const repaid = fill !== undefined && s("fillToSettle_ms") !== undefined ? fill + s("fillToSettle_ms")! : undefined;
       rows.push({
-        orderId: l.orderId, amount: amt, tier: run.tier,
+        orderId: l.orderId, amount: amt, tier: run.tier, delay: run.tierDelay,
         t: { open: 0, fill, seen, repaid },
         tx: { open: l.tx.open, fill: l.tx.fill, react: l.tx.react, settle: l.tx.settle },
         state: l.ok ? "repaid" : "waiting", source: "bench", sortKey: Date.parse(run.run.slice(-24).replace(/-(\d\d)-(\d\d)-(\d{3})Z$/, ":$1:$2.$3Z").replace(/T(\d\d)-/, "T$1:")) + l.i,
@@ -268,16 +270,20 @@ function renderSheet() {
     const no = rows.length - idx;
     const isOpen = openRow?.toLowerCase() === r.orderId.toLowerCase();
     const stateLabel = { open: "Open", filled: "Filled", waiting: "Queued", repaid: "Repaid", refunded: "Refunded" }[r.state];
+    const delay = r.delay ?? (() => { const i = r.tier ?? tierOf(r.amount); return i === null ? undefined : tiers[i]?.delay; })();
+    const policy = delay === undefined ? "—" : delay === 0 ? "on sight" : `after ${fmtS(delay)}`;
+    const toRepaid = r.t.repaid !== undefined && r.t.fill !== undefined ? r.t.repaid - r.t.fill : undefined;
+    const over = toRepaid !== undefined && delay ? `<small class="over">+${fmtS(toRepaid - delay)}</small>` : "";
     html.push(`<tr class="move${isOpen ? " is-open" : ""}" data-id="${r.orderId}" tabindex="0" aria-expanded="${isOpen}">
-      <td class="move-no">${String(no).padStart(3, "0")}</td>
-      <td class="mono">${short(r.orderId)}</td>
-      <td class="num">${fmtUsdc(r.amount)}</td>
-      <td>${tierLabel(r.tier ?? tierOf(r.amount))}</td>
-      <td class="num">${fmtS(r.t.fill)}</td>
-      <td class="num">${fmtS(r.t.seen !== undefined && r.t.fill !== undefined ? r.t.seen - r.t.fill : undefined)}</td>
-      <td class="num">${fmtS(r.t.repaid !== undefined && r.t.fill !== undefined ? r.t.repaid - r.t.fill : undefined)}</td>
-      <td class="num">${fmtS(r.t.repaid)}</td>
-      <td><span class="state" data-s="${r.state}">${stateLabel}</span></td>
+      <td class="move-no" data-l="Move">${String(no).padStart(3, "0")}</td>
+      <td class="mono" data-l="Order">${short(r.orderId)}</td>
+      <td class="num" data-l="USDC">${fmtUsdc(r.amount)}</td>
+      <td data-l="Settles">${policy}</td>
+      <td class="num" data-l="Open → fill">${fmtS(r.t.fill)}</td>
+      <td class="num" data-l="Fill → seen">${fmtS(r.t.seen !== undefined && r.t.fill !== undefined ? r.t.seen - r.t.fill : undefined)}</td>
+      <td class="num" data-l="Fill → repaid">${fmtS(toRepaid)}${over}</td>
+      <td class="num" data-l="Total">${fmtS(r.t.repaid)}</td>
+      <td data-l="State"><span class="state" data-s="${r.state}">${stateLabel}</span></td>
     </tr>`);
     if (isOpen) {
       const done = { open: Boolean(r.tx.open), fill: Boolean(r.tx.fill), react: Boolean(r.tx.react), settle: Boolean(r.tx.settle) };
@@ -294,10 +300,10 @@ function renderSheet() {
   body.innerHTML = html.join("");
   const bench = rows.filter((r) => r.source === "bench").length;
   const fromChain = rows.length - bench;
-  $("sheet-note").textContent = `${rows.length} moves · ${bench} from recorded bench runs${fromChain > 0 ? `, ${fromChain} read from recent blocks` : ""} · times from the open · select a move for its transactions`;
+  $("sheet-note").textContent = `${rows.length} moves · ${bench} from recorded bench runs${fromChain > 0 ? `, ${fromChain} read from recent blocks` : ""} · fill → seen and fill → repaid count from the fill, +N is time over the order's policy delay · select a move for its transactions`;
 }
 
-function loopSvg(d: { open: boolean; fill: boolean; react: boolean; settle: boolean }) {
+function loopSvg(d: { open: boolean; fill: boolean; react: boolean; settle: boolean }, legs = false) {
   // One loop geometry: Base → Unichain → Lasna → Base.
   const n = [
     { x: 30, y: 70, label: "Base", on: d.open },
@@ -305,10 +311,11 @@ function loopSvg(d: { open: boolean; fill: boolean; react: boolean; settle: bool
     { x: 190, y: 70, label: "Lasna", on: d.react },
   ];
   const edge = (a: (typeof n)[0], b: (typeof n)[0], on: boolean) => `<line class="edge${on ? " done" : ""}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;
-  return `<svg viewBox="0 -14 220 128" role="img" aria-label="Order progress around the loop">
+  return `<svg viewBox="${legs ? "-34 -14 288 134" : "0 -14 220 128"}" role="img" aria-label="${legs ? "The loop: open on Base, fill on Unichain, check on Lasna, repay on Base" : "Order progress around the loop"}">
     ${edge(n[0], n[1], d.fill)}${edge(n[1], n[2], d.react)}<path class="edge${d.settle ? " done" : ""}" d="M190 70 Q110 120 30 70"/>
     ${n.map((p) => `<circle class="node${p.on ? " done" : ""}" cx="${p.x}" cy="${p.y}" r="9"/><text x="${p.x}" y="${p.y + (p.y < 40 ? -14 : 26)}" text-anchor="middle">${p.label}</text>`).join("")}
     <circle class="node${d.settle ? " done" : ""}" cx="30" cy="70" r="5"/>
+    ${legs ? `<text class="leg" x="58" y="36" text-anchor="end">open → fill</text><text class="leg" x="162" y="36">fill → seen</text><text class="leg" x="110" y="112" text-anchor="middle">repaid</text>` : ""}
   </svg>`;
 }
 
@@ -513,6 +520,9 @@ async function boot() {
     } catch {
       tiers = [];
     }
+  }
+  if (!tiers.length && config.plannedTiers) {
+    tiers = config.plannedTiers.map((t) => ({ maxAmount: BigInt(t.maxAmount), delay: t.delay }));
   }
   activeTier = 0;
   renderDuel();

@@ -24,18 +24,7 @@
         <h1 id="duel-h" class="duel__title">When does the solver get its money back?</h1>
         <p class="duel__lede">A solver fills your order on Unichain from its own inventory. Snapsettle's Reactive contract sees the fill and repays the solver on Base. No challenge window.</p>
         <div class="duel__clock" id="clock"></div>
-        <div class="duel__plates">
-          <div class="plate plate--across">
-            <span class="plate__who">Across · optimistic challenge window</span>
-            <span class="plate__time">2:00:00</span>
-            <span class="plate__src">Default challenge period, <a href="https://docs.across.to/user-docs/how-across-works/speed" target="_blank" rel="noopener">Across docs</a></span>
-          </div>
-          <div class="plate plate--snap">
-            <span class="plate__who">Snapsettle · fill → solver repaid, p50</span>
-            <span class="plate__time" id="snap-time">—</span>
-            <span class="plate__src" id="snap-src">Waiting for bench data</span>
-          </div>
-        </div>
+        <p class="duel__caption" id="snap-src">Waiting for bench data.</p>
       </section>
 
       <section class="splits" aria-labelledby="splits-h">
@@ -43,7 +32,10 @@
           <h2 id="splits-h">Leg splits</h2>
           <div class="tabs" role="tablist" aria-label="Finality tier" id="tier-tabs"></div>
         </div>
-        <p class="splits__policy" id="tier-policy"></p>
+        <div class="splits__intro">
+          <div class="splits__loop loop" id="splits-loop"></div>
+          <p class="splits__policy" id="tier-policy"></p>
+        </div>
         <table class="splits__table">
           <thead><tr><th scope="col">Leg</th><th scope="col" class="num">p50</th><th scope="col" class="num">p95</th><th scope="col" class="scale" aria-label="Scale"></th></tr></thead>
           <tbody id="splits-body"></tbody>
@@ -61,10 +53,10 @@
             <thead>
               <tr>
                 <th scope="col">Move</th><th scope="col">Order</th><th scope="col" class="num">Size</th><th scope="col">Tier</th>
-                <th scope="col" class="num" title="Seconds from open to fill">Fill</th>
-                <th scope="col" class="num" title="Seconds from fill to FillAccepted on Lasna">Seen</th>
-                <th scope="col" class="num" title="Seconds from fill to Settled on Base">Repaid</th>
-                <th scope="col" class="num" title="Seconds from open to Settled">Total</th>
+                <th scope="col" class="num" title="Open to fill on Unichain">Open → fill</th>
+                <th scope="col" class="num" title="Fill to FillAccepted on Lasna">Fill → seen</th>
+                <th scope="col" class="num" title="Fill to Settled on Base, against the tier's policy delay">Fill → repaid</th>
+                <th scope="col" class="num" title="Open to Settled">Total</th>
                 <th scope="col">State</th>
               </tr>
             </thead>
