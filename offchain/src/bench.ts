@@ -63,7 +63,20 @@ async function ensureAllowance() {
 // Keeps loops running on small faucet balances: when the user runs short on Base, USDC flows back
 // (solver's Base USDC → user, user's Unichain USDC → solver). Both wallets are the bench's own.
 let rebalancing: Promise<void> | null = null;
+let fundLock: Promise<void> = Promise.resolve();
 async function ensureFunds(amount: bigint) {
+  const prev = fundLock;
+  let release!: () => void;
+  fundLock = new Promise((r) => (release = r));
+  await prev;
+  try {
+    await ensureFundsInner(amount);
+  } finally {
+    // hold the lock briefly so this worker's open lands before the next balance check
+    setTimeout(release, 1500);
+  }
+}
+async function ensureFundsInner(amount: bigint) {
   const bal = (await pub.origin.readContract({ address: addr.tokenOrigin, abi: abi.erc20, functionName: "balanceOf", args: [userAddr] })) as bigint;
   if (bal >= amount) return;
   rebalancing ??= (async () => {
@@ -87,7 +100,7 @@ async function ensureFunds(amount: bigint) {
     const b = (await pub.origin.readContract({ address: addr.tokenOrigin, abi: abi.erc20, functionName: "balanceOf", args: [userAddr] })) as bigint;
     if (b >= amount) return;
     await sleep(5000);
-    if (i % 6 === 5) await ensureFunds(amount);
+    if (i % 6 === 5) await ensureFundsInner(amount);
   }
   throw new Error("user has too little USDC on Base even after rebalancing");
 }
@@ -112,6 +125,7 @@ async function oneLoop(i: number, amount: bigint, hub: EventHub): Promise<LoopRo
   const hash = await user.writeContract({ address: addr.escrow, abi: abi.escrow, functionName: "open", args: [order], chain: chains.origin, account: user.account! });
   const rcpt = await pub.origin.waitForTransactionReceipt({ hash, pollingInterval: 100 });
   const minedSeenAt = now();
+  if (rcpt.status !== "success") throw new Error(`open reverted on Base Sepolia: ${hash}`);
   const ev = parseEventLogs({ abi: abi.escrow, logs: rcpt.logs, eventName: "Opened" })[0];
   const orderId = (ev.args as { orderId: Hex }).orderId;
   const opened: Sighting = { block: rcpt.blockNumber, blockTs: await blockTs(pub.origin, rcpt.blockNumber), tx: hash, seenAtMs: minedSeenAt, args: {} };

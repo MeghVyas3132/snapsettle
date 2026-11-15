@@ -50,13 +50,22 @@ const LASNA_EVENTS = [
 ];
 const TIERS_ABI = [{ type: "function", name: "tiers", stateMutability: "view", inputs: [], outputs: [{ type: "tuple[]", components: [{ name: "maxAmount", type: "uint256" }, { name: "delay", type: "uint32" }] }] }] as const;
 
-const LEGS: Array<{ key: string; name: string; sub: string; policy?: boolean }> = [
-  { key: "fillToSettle_ms", name: "Fill → solver repaid", sub: "Reactive settlement, the claim", policy: true },
-  { key: "openToFill_ms", name: "Open → fill", sub: "solver picks up and fills on Unichain" },
-  { key: "fillToReact_ms", name: "Fill → seen on Lasna", sub: "Reactive observes and checks the fill" },
-  { key: "reactToSettle_ms", name: "Settle request → repaid", sub: "callback lands on Base" },
-  { key: "full_ms", name: "Full loop", sub: "open sent → solver repaid" },
+// Each leg uses its most RPC-independent clock; `fallback` covers runs recorded before that field existed.
+const LEGS: Array<{ key: string; fallback?: string; name: string; sub: string; policy?: boolean }> = [
+  { key: "fillToSettle_s", fallback: "fillToSettle_ms", name: "Fill → solver repaid", sub: "Reactive settlement · chain block times", policy: true },
+  { key: "fullBase_ms", fallback: "full_ms", name: "Open → repaid", sub: "full loop · counted in Base blocks (200 ms)" },
+  { key: "openToFill_ms", name: "Open → fill", sub: "solver picks up and fills · solver's receipt" },
+  { key: "reactToSettle_s", fallback: "reactToSettle_ms", name: "Settle request → repaid", sub: "callback lands on Base · chain block times" },
+  { key: "fillToReact_ms", name: "Fill → seen on Lasna", sub: "as an observer saw it via public RPC · upper bound" },
 ];
+/** A segment's stat in milliseconds, from `*_s` (seconds) or `*_ms` keys. */
+function statMs(run: Run, key: string, fallback?: string): Stat | undefined {
+  const pick = run.summary[key]?.n ? key : fallback && run.summary[fallback]?.n ? fallback : undefined;
+  if (!pick) return undefined;
+  const s = run.summary[pick];
+  const k = pick.endsWith("_s") ? 1000 : 1;
+  return { n: s.n, min: s.min * k, p50: s.p50 * k, p95: s.p95 * k, max: s.max * k };
+}
 
 // ---------------------------------------------------------------- formatting
 
@@ -67,6 +76,8 @@ const fmtS = (s: number | null | undefined) => {
   const r = Math.round(s % 60);
   return `${m}:${String(r).padStart(2, "0")}`;
 };
+/** Cross-chain block clocks differ by about ±1 s: a difference under a second reads "<1 s", never negative. */
+const crossChain = (s: number | undefined) => (s === undefined || !Number.isFinite(s) ? "—" : s < 1 ? "<1 s" : fmtS(s));
 const fmtUsdc = (a: bigint | null) => (a === null ? "—" : (Number(a) / 1e6).toLocaleString("en-US", { maximumFractionDigits: 6 }));
 const short = (h?: string | null) => (h ? `${h.slice(0, 6)}…${h.slice(-4)}` : "—");
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -157,15 +168,19 @@ function latestRun(tier: number): Run | undefined {
 
 function renderDuel() {
   const run = latestRun(0);
-  const st = run?.summary["fillToSettle_ms"];
+  const st = run ? statMs(run, "fillToSettle_s", "fillToSettle_ms") : undefined;
   if (!run || !st || !Number.isFinite(st.p50)) {
     $("snap-src").textContent = env === "live" ? "Snapsettle's face fills from live bench runs once the contracts are deployed." : "No local bench runs yet.";
     clock.setSnap(null, null);
     return;
   }
   clock.setSnap(st.p50 / 1000, st.p95 / 1000);
+  const wall = run.summary["fillToSettle_ms"];
   const where = env === "live" ? "live loops on Base Sepolia, Unichain Sepolia and Lasna" : "loops on the local harness (emulated relay)";
-  $("snap-src").innerHTML = `Snapsettle face: fill → solver repaid, median and p95 over ${st.n} ${where}, orders settled on sight. Run <span class="mono">${esc(run.run)}</span>, every order in the <a href="#sheet-h">scoresheet</a>.`;
+  const clockNote = run.summary["fillToSettle_s"]?.n
+    ? `measured on the chains' own block clocks (1 s resolution)${wall?.n ? `; an observer polling public RPCs saw p50 ${fmtS(wall.p50 / 1000)}, p95 ${fmtS(wall.p95 / 1000)}, an upper bound` : ""}`
+    : "measured by wall clock";
+  $("snap-src").innerHTML = `Snapsettle face: fill → solver repaid over ${st.n} ${where}, orders settled on sight, ${clockNote}. Run <span class="mono">${esc(run.run)}</span>, every order in the <a href="#sheet-h">scoresheet</a>.`;
 }
 
 function renderTierTabs() {
@@ -211,7 +226,7 @@ function renderSplits() {
   const scale = (ms: number) => Math.max(0, Math.min(1, Math.log10(ms / 500) / Math.log10(600_000 / 500)));
   const policyMs = (t?.delay ?? 0) * 1000;
   body.innerHTML = LEGS.map((leg) => {
-    const s = run.summary[leg.key];
+    const s = statMs(run, leg.key, leg.fallback);
     if (!s || !s.n) return `<tr><td><span class="leg-name">${leg.name}</span><span class="leg-sub">${leg.sub}</span></td><td class="num">—</td><td class="num">—</td><td></td></tr>`;
     const over = leg.policy && policyMs > 0 ? ` <small>+${fmtS((s.p50 - policyMs) / 1000)} over policy</small>` : "";
     const policyMark = leg.policy && policyMs > 0 ? `<span class="bar-policy" style="left:${(scale(policyMs) * 100).toFixed(1)}%" title="policy delay"></span>` : "";
@@ -255,7 +270,9 @@ function renderSheet() {
     const prev = merged.get(k);
     // A row whose Opened fell outside the scanned window has no size or start time: show it only via its bench record.
     if (!r.tx.open && !prev) continue;
-    merged.set(k, prev && prev.state === "repaid" && r.state !== "repaid" ? prev : { ...r, tier: r.tier ?? prev?.tier ?? null });
+    // A bench record carries the precise per-leg timing; the chain read only adds orders the bench did not record.
+    if (prev) continue;
+    merged.set(k, r);
   }
   const rows = [...merged.values()].sort((a, b) => a.sortKey - b.sortKey);
   const body = $("sheet-body");
@@ -280,8 +297,8 @@ function renderSheet() {
       <td class="num" data-l="USDC">${fmtUsdc(r.amount)}</td>
       <td data-l="Settles">${policy}</td>
       <td class="num" data-l="Open → fill">${fmtS(r.t.fill)}</td>
-      <td class="num" data-l="Fill → seen">${fmtS(r.t.seen !== undefined && r.t.fill !== undefined ? r.t.seen - r.t.fill : undefined)}</td>
-      <td class="num" data-l="Fill → repaid">${fmtS(toRepaid)}${over}</td>
+      <td class="num" data-l="Fill → seen">${crossChain(r.t.seen !== undefined && r.t.fill !== undefined ? r.t.seen - r.t.fill : undefined)}</td>
+      <td class="num" data-l="Fill → repaid">${crossChain(toRepaid)}${over}</td>
       <td class="num" data-l="Total">${fmtS(r.t.repaid)}</td>
       <td data-l="State"><span class="state" data-s="${r.state}">${stateLabel}</span></td>
     </tr>`);
@@ -379,20 +396,32 @@ function renderFoot() {
 
 const blockTs = new Map<string, number>();
 async function ts(c: PublicClient, chain: string, block: bigint): Promise<number> {
+  const h = heads[chain];
+  if (BLOCK_MS[chain] && h) return h.ts - (Number(h.block - block) * BLOCK_MS[chain]) / 1000;
   const k = `${chain}:${block}`;
   let v = blockTs.get(k);
-  if (v === undefined) {
-    v = Number((await c.getBlock({ blockNumber: block })).timestamp);
-    blockTs.set(k, v);
+  for (let i = 0; v === undefined && i < 6; i++) {
+    try {
+      v = Number((await c.getBlock({ blockNumber: block })).timestamp);
+      blockTs.set(k, v);
+    } catch {
+      await new Promise((r) => setTimeout(r, 300 * (i + 1)));
+    }
   }
+  if (v === undefined) throw new Error(`block ${block} unavailable`);
   return v;
 }
 
 const cursors: Record<string, bigint> = {};
+const heads: Record<string, { block: bigint; ts: number }> = {};
+// Base Sepolia makes a block every 200 ms and Unichain Sepolia every 1 s (both measured on-chain), so their block
+// times follow from the block number without one RPC call per block. Lasna (~1.04 s) is fetched.
+const BLOCK_MS: Record<string, number> = { origin: 200, dest: 1000 };
 async function pollChain(name: "origin" | "dest" | "lasna", address: Address | null, events: readonly ReturnType<typeof parseAbiItem>[], lookback: bigint) {
   const c = clients![name];
   const head = await c.getBlockNumber();
   const latest = await c.getBlock({ blockNumber: head });
+  heads[name] = { block: head, ts: Number(latest.timestamp) };
   const light = document.querySelector(`[data-chain="${name}"]`);
   if (light) {
     const age = Date.now() / 1000 - Number(latest.timestamp);
@@ -400,12 +429,19 @@ async function pollChain(name: "origin" | "dest" | "lasna", address: Address | n
     light.querySelector("b")!.textContent = `#${head.toLocaleString("en-US")}`;
   }
   if (!address) return [];
-  const from = cursors[name] ?? (head > lookback ? head - lookback : 0n);
-  if (head <= from) return [];
-  const to = head - from > 500n ? from + 500n : head;
-  const logs = await c.getLogs({ address, events: events as never, fromBlock: from + 1n, toBlock: to });
-  cursors[name] = to;
-  return logs as unknown as Array<{ eventName: string; args: Record<string, unknown>; blockNumber: bigint; transactionHash: Hex }>;
+  // sepolia.base.org rejects eth_getLogs wider than 200 blocks (HTTP 413); the others accept more.
+  const span = name === "origin" ? 190n : 500n;
+  type L = { eventName: string; args: Record<string, unknown>; blockNumber: bigint; transactionHash: Hex };
+  const out: L[] = [];
+  let from = cursors[name] ?? (head > lookback ? head - lookback : 0n);
+  for (let i = 0; i < 12 && head > from; i++) {
+    const to = head - from > span ? from + span : head;
+    out.push(...((await c.getLogs({ address, events: events as never, fromBlock: from + 1n, toBlock: to })) as unknown as L[]));
+    from = to;
+  }
+  // Re-scan the last few blocks next time: a load-balanced RPC can report a head its log index has not reached.
+  cursors[name] = from > 10n ? from - 10n : 0n;
+  return out;
 }
 
 function rowFor(id: Hex): Row {
@@ -418,8 +454,18 @@ function rowFor(id: Hex): Row {
   return r;
 }
 
+let polling = false;
+async function prefetchTs(c: PublicClient, chain: string, blocks: bigint[]) {
+  const todo = [...new Set(blocks.map(String))].filter((b) => !blockTs.has(`${chain}:${b}`)).map((b) => BigInt(b));
+  if (BLOCK_MS[chain]) return; // derived from the block number, nothing to fetch
+  for (let i = 0; i < todo.length; i += 4) {
+    await Promise.all(todo.slice(i, i + 4).map((b) => ts(c, chain, b).catch(() => undefined)));
+  }
+}
+
 async function poll() {
-  if (!clients) return;
+  if (!clients || polling) return;
+  polling = true;
   const a = config.addresses;
   let settledNow = false;
   try {
@@ -428,7 +474,13 @@ async function poll() {
       pollChain("dest", a.destinationSettler, DEST_EVENTS, 900n),
       pollChain("lasna", a.reactive, LASNA_EVENTS, 900n),
     ]);
+    await Promise.all([
+      prefetchTs(clients.origin, "origin", o.map((x) => x.blockNumber)),
+      prefetchTs(clients.dest, "dest", d.map((x) => x.blockNumber)),
+      prefetchTs(clients.lasna, "lasna", l.filter((x) => x.eventName === "FillAccepted").map((x) => x.blockNumber)),
+    ]);
     const absolute: Record<string, { open?: number; fill?: number; seen?: number; repaid?: number }> = {};
+    if (params.has("debug")) console.info(`poll: origin ${o.length}, dest ${d.length}, lasna ${l.length}, cursors ${JSON.stringify(Object.fromEntries(Object.entries(cursors).map(([k, v]) => [k, String(v)])))}`);
     for (const log of o) {
       const id = log.args.orderId as Hex;
       const r = rowFor(id);
@@ -441,10 +493,10 @@ async function poll() {
         r.sortKey = at * 1000;
         (absolute[id] ??= {}).open = at;
       } else if (log.eventName === "Settled") {
+        if (!r.tx.settle) settledNow = true;
         r.tx.settle = log.transactionHash;
         r.state = "repaid";
         (absolute[id] ??= {}).repaid = at;
-        settledNow = true;
       } else if (log.eventName === "Refunded") {
         r.state = "refunded";
       }
@@ -479,9 +531,11 @@ async function poll() {
         };
       }
     }
-  } catch {
+  } catch (e) {
+    console.warn("poll failed:", (e as Error).message?.split("\n")[0]);
     document.querySelectorAll("[data-chain] .light").forEach((x) => x.getAttribute("data-state") === "ok" || x.setAttribute("data-state", "down"));
   }
+  polling = false;
   renderSheet();
   if (settledNow) clock.press();
 }
@@ -509,9 +563,9 @@ async function boot() {
   renderNotice();
   renderChains();
   clients = {
-    origin: createPublicClient({ transport: http(config.rpc.origin) }) as PublicClient,
-    dest: createPublicClient({ transport: http(config.rpc.dest) }) as PublicClient,
-    lasna: createPublicClient({ transport: http(config.rpc.lasna) }) as PublicClient,
+    origin: createPublicClient({ transport: http(config.rpc.origin, { batch: { batchSize: 20, wait: 50 }, retryCount: 4, retryDelay: 600 }) }) as PublicClient,
+    dest: createPublicClient({ transport: http(config.rpc.dest, { batch: { batchSize: 20, wait: 50 }, retryCount: 4, retryDelay: 600 }) }) as PublicClient,
+    lasna: createPublicClient({ transport: http(config.rpc.lasna, { batch: { batchSize: 20, wait: 50 }, retryCount: 4, retryDelay: 600 }) }) as PublicClient,
   };
   tiers = [];
   if (config.addresses.reactive) {

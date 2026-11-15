@@ -23,3 +23,8 @@
 ## 2026-11-15 (live setup)
 - **Agent-created testnet wallets** (owner approved in chat): deployer, user and solver generated with `cast wallet new`. Keys are only in gitignored files (`.secrets/deployer.env`, `offchain/.env`, mode 600) and are never printed. The owner funds the deployer alone; `pnpm fund distribute` hands gas and USDC to the user and solver and buys lREACT from the faucet.
 - **Live tier thresholds lowered to ≤ 0.5 USDC on sight, ≤ 2 USDC after 30 s, above after 300 s** (bench amounts 0.25 / 1.25 / 2.5). Reason: 150+ live loops on faucet USDC. With automatic rebalancing (the solver's Base USDC goes back to the user, the user's Unichain USDC back to the solver), ~10 USDC per chain covers every tier.
+
+## 2026-11-16 (live measurement)
+- **Headline "fill → solver repaid" uses the chains' own block timestamps** (instant tier: p50 1 s, p95 2 s, 1 s resolution). The observer's wall clock (p50 4.2 s, p95 6.5 s) is shown next to it as an upper bound. Reason: the wall clock is inflated by public-RPC visibility lag; for "fill → seen on Lasna", the Lasna RPC reported events ~4 s after their block timestamps.
+- **Full loop counted in Base Sepolia blocks** (measured 0.200 s/block): p50 7.2 s, p95 10.2 s. This is the most RPC-independent measure of open → repaid.
+- **Dashboard derives Base/Unichain block times from block numbers** (200 ms / 1 s, measured on-chain) instead of one `getBlock` per event, which tripped the public RPC's 429 rate limit.
