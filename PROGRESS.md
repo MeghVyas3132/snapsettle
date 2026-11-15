@@ -12,9 +12,12 @@ Resume here. Update after every milestone.
 - 2026-11-15: Dashboard (`dashboard/`, Vite + viem, static): chess-clock duel (Across 2 h vs measured fill→repaid p50), leg splits per tier on one log scale with policy delta, scoresheet (bench evidence + live chain polling, expandable to four tx links), on-chain refusals, contracts and sources. LIVE/LOCAL switch; LIVE empty state before deploy. Phone layout checked (no overflow). Pages + CI workflows. PRODUCT.md + Impeccable surface brief (chess clock/scoresheet direction, seed:872bee7c00692510). Finish review running.
 - 2026-11-15: Docs: README (judge path), SECURITY.md (trust model, tested properties, limits), docs/05-finality-policy.md (answer to Reactive's question), LICENSE (MIT), `pnpm judge` generator for JUDGE.md from deployments + evidence. Local benches: tier0 8/8, tier1 4/4, tier2 3/3 settled (LOCAL).
 
+- 2026-11-15: Finish review #1 = fix (8 items); all applied: readouts on the clock housing (no hero cards), p95 tick, bezels/seam/rocker; tier labels from each run's recorded policy (bench now records tierDelay/tierPolicy/contracts); column semantics; phone reflow (two-line moves, no sideways scroll); +N over policy; shared loop geometry on Leg splits; condensed-caps headings; live-empty planned tiers; mode-dependent source copy. Verdict pass requested.
+- 2026-11-15: Video pipeline `pnpm record` (Playwright 1920×1080, captions injected as an overlay since this ffmpeg has no text filters, one real order mid-recording, h264_videotoolbox MP4 capped 2:55). docs/VIDEO.md script.
+
 ## Next
-1. Act on the finish review verdict for the dashboard; then DESIGN.md via the documenter.
-2. Video script (docs/VIDEO.md) and a recording pipeline (Playwright video of the dashboard + ffmpeg captions).
+1. Finish review verdict → DESIGN.md via the impeccable documenter.
+2. Test-record a LOCAL video to validate the pipeline (not for submission).
 3. LIVE (blocked on owner funding): deploy 5 steps (docs/03-deploy.md, env TIER0_MAX/TIER1_MAX defaults, REFUND_GRACE=60, LOOP_LATENCY = measured p95 later), verify sources, run solver + bench 50+ loops per tier, negative cases, `SNAP_ENV=live pnpm judge`, rebuild dashboard data.
 4. Public repo MeghVyas3132/snapsettle (~28 Nov), Pages deploy, submission on DoraHacks.
 

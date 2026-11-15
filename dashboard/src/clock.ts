@@ -55,10 +55,12 @@ function face(svg: SVGSVGElement, cx: number, labels: string[], scale: string, c
   return { hand, fill, marker };
 }
 
-function readout(svg: SVGSVGElement, cx: number, who: string, cls: "across" | "snap") {
+function readout(svg: SVGSVGElement, cx: number, who: string, short: string, cls: "across" | "snap") {
   const g = el("g", { class: `ck-readout ck-readout--${cls}` }, svg);
-  const w = el("text", { x: cx, y: 362, "text-anchor": "middle", class: "ck-who" }, g);
+  const w = el("text", { x: cx, y: 362, "text-anchor": "middle", class: "ck-who ck-who--long" }, g);
   w.textContent = who;
+  const ws = el("text", { x: cx, y: 362, "text-anchor": "middle", class: "ck-who ck-who--short" }, g);
+  ws.textContent = short;
   const v = el("text", { x: cx, y: 412, "text-anchor": "middle", class: "ck-value" }, g);
   const s = el("text", { x: cx, y: 440, "text-anchor": "middle", class: "ck-sub" }, g);
   return { v, s, g };
@@ -89,13 +91,15 @@ export function mountClock(host: HTMLElement): ClockHandle {
   across.fill.setAttribute("d", sector(220, CY, R - 6, 2 / 12));
   across.hand.style.transform = `rotate(${(2 / 12) * 360}deg)`;
 
-  const a = readout(svg, 220, "ACROSS · CHALLENGE WINDOW", "across");
+  const a = readout(svg, 220, "ACROSS · CHALLENGE WINDOW", "ACROSS WINDOW", "across");
   a.v.textContent = "2:00:00";
   const link = el("a", { href: "https://docs.across.to/user-docs/how-across-works/speed", target: "_blank", rel: "noopener" }, a.g);
+  // A generous invisible hit area so the citation is a usable tap target when the clock scales down.
+  el("rect", { x: 70, y: 414, width: 300, height: 44, fill: "transparent" }, link);
   const linkText = el("text", { x: 220, y: 440, "text-anchor": "middle", class: "ck-sub ck-link" }, link);
   linkText.textContent = "default, per Across docs";
   a.s.remove();
-  const s = readout(svg, 580, "SNAPSETTLE · FILL → REPAID", "snap");
+  const s = readout(svg, 580, "SNAPSETTLE · FILL → REPAID", "SNAPSETTLE REPAY", "snap");
 
   host.replaceChildren(svg);
 

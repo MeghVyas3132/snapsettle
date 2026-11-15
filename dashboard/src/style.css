@@ -153,6 +153,7 @@ h1, h2, h3 { font-family: var(--font-head); font-weight: 700; letter-spacing: 0.
 .ck-rocker { stroke: var(--walnut-900); stroke-width: 10; stroke-linecap: round; }
 .ck-p95 { stroke: var(--green-700); stroke-width: 5; stroke-linecap: round; }
 .ck-who { font: 600 15px var(--font-body); letter-spacing: 0.12em; fill: var(--walnut-200); }
+.ck-who--short { display: none; }
 .ck-value { font: 700 50px var(--font-head); letter-spacing: 0.02em; }
 .ck-readout--across .ck-value { fill: #f2948a; }
 .ck-readout--snap .ck-value { fill: #b9d995; }
@@ -191,8 +192,10 @@ h1, h2, h3 { font-family: var(--font-head); font-weight: 700; letter-spacing: 0.
 .tabs button + button { border-left: 1px solid var(--rule-strong); }
 .tabs button[aria-selected="true"] { background: var(--green-500); color: var(--buff-50); }
 .tabs button:hover:not([aria-selected="true"]) { background: var(--buff-200); }
-.splits__intro { display: grid; grid-template-columns: 150px 1fr; gap: 16px; align-items: center; }
-.splits__loop.loop svg { width: 150px; height: auto; display: block; }
+.splits__intro { display: grid; grid-template-columns: 236px 1fr; gap: 18px; align-items: center; }
+.splits__loop.loop svg { width: 236px; height: auto; display: block; }
+.splits__loop.loop text { font-size: 15px; }
+.splits__loop.loop .leg { font-size: 14.5px; }
 .splits__policy { margin: 0; font-size: 14px; color: var(--ink-500); }
 .splits__loop .edge { stroke: var(--green-600); }
 .loop .leg { font: 500 10px var(--font-body); fill: var(--ink-500); }
@@ -272,9 +275,11 @@ tr.detail td { background: var(--buff-50); padding: 14px 10px 18px; white-space:
   .bar__tag, .bar__env .long, .bar__chains b { display: none; }
   .ck-num { font-size: 30px; }
   .ck-scale { font-size: 22px; }
-  .ck-who { font-size: 22px; letter-spacing: 0.06em; }
   .ck-value { font-size: 64px; }
-  .ck-sub { font-size: 22px; }
+  .ck-sub { font-size: 30px; }
+  .ck-who { font-size: 26px; letter-spacing: 0.06em; }
+  .ck-who--long { display: none; }
+  .ck-who--short { display: inline; }
   .splits__intro { grid-template-columns: 1fr; }
   /* The scoresheet reflows into two-line moves: identity on the first, the legs on the second. */
   .sheet__table { min-width: 0; }
