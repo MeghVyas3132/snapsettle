@@ -1,0 +1,21 @@
+{
+  "name": "@snapsettle/offchain",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "relay:local": "tsx src/relay-local.ts",
+    "solver": "tsx src/solver.ts",
+    "bench": "tsx src/bench.ts",
+    "negative": "tsx src/negative.ts",
+    "report": "tsx src/report.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "viem": "^2.57.19"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -16,14 +16,34 @@ abstract contract Base is Script {
     uint256 constant LASNA = 5318007;
     address constant BASE_SEPOLIA_CALLBACK_PROXY = 0x476F44b11F5C942c58f4c8E3d0300E5710743585;
 
+    /// @dev DEPLOY_TAG separates environments: "live" (default) or "local" (anvil harness).
+    function _dir() internal view returns (string memory) {
+        return string.concat("deployments/", vm.envOr("DEPLOY_TAG", string("live")), "/");
+    }
+
     function _write(string memory step, string memory key, address value) internal {
-        string memory path = string.concat("deployments/", step, ".json");
+        string memory path = string.concat(_dir(), step, ".json");
         vm.writeJson(vm.serializeAddress(step, key, value), path);
         console2.log(step, key, value);
     }
 
+    /// @dev Finality tiers (token base units, 6 decimals). Defaults suit faucet-funded testnets:
+    ///      <= 1 USDC settles on sight, <= 10 USDC waits 30 s, above waits 300 s. Override with env.
+    function _t0Max() internal view returns (uint256) {
+        return vm.envOr("TIER0_MAX", uint256(1e6));
+    }
+
+    function _t1Max() internal view returns (uint256) {
+        return vm.envOr("TIER1_MAX", uint256(10e6));
+    }
+
+    function _d(uint256 i) internal view returns (uint32) {
+        uint256[3] memory defaults = [uint256(0), 30, 300];
+        return uint32(vm.envOr(string.concat("TIER", vm.toString(i), "_DELAY"), defaults[i]));
+    }
+
     function _read(string memory step, string memory key) internal view returns (address) {
-        string memory json = vm.readFile(string.concat("deployments/", step, ".json"));
+        string memory json = vm.readFile(string.concat(_dir(), step, ".json"));
         return vm.parseJsonAddress(json, string.concat(".", key));
     }
 }
@@ -46,9 +66,9 @@ contract DeployReactive is Base {
         require(block.chainid == LASNA, "run on Lasna");
         address dest = _read("1-destination", "destinationSettler");
         SnapsettleReactive.Tier[] memory t = new SnapsettleReactive.Tier[](3);
-        t[0] = SnapsettleReactive.Tier(100e6, 0); // <= 100 USDC: settle on sight
-        t[1] = SnapsettleReactive.Tier(10_000e6, 30); // <= 10k USDC: 30 s
-        t[2] = SnapsettleReactive.Tier(type(uint256).max, 300); // above: 5 min
+        t[0] = SnapsettleReactive.Tier(_t0Max(), _d(0)); // small: settle on sight
+        t[1] = SnapsettleReactive.Tier(_t1Max(), _d(1)); // medium
+        t[2] = SnapsettleReactive.Tier(type(uint256).max, _d(2)); // large
         uint256 fund = vm.envOr("RC_FUND", uint256(2 ether));
 
         vm.startBroadcast();
@@ -65,7 +85,7 @@ contract DeployOrigin is Base {
         require(block.chainid == BASE_SEPOLIA, "run on Base Sepolia");
         address dest = _read("1-destination", "destinationSettler");
         address rc = _read("2-reactive", "snapsettleReactive");
-        uint32 grace = uint32(vm.envOr("REFUND_GRACE", uint256(600)));
+        uint32 grace = uint32(vm.envOr("REFUND_GRACE", uint256(60)));
         uint256 fund = vm.envOr("ESCROW_FUND", uint256(0.01 ether));
 
         vm.startBroadcast();
@@ -99,9 +119,9 @@ contract DeployResolver is Base {
         address rc = _read("2-reactive", "snapsettleReactive");
         uint32 loop = uint32(vm.envOr("LOOP_LATENCY", uint256(10)));
         SnapsettleResolver.Tier[] memory t = new SnapsettleResolver.Tier[](3);
-        t[0] = SnapsettleResolver.Tier(100e6, 0);
-        t[1] = SnapsettleResolver.Tier(10_000e6, 30);
-        t[2] = SnapsettleResolver.Tier(type(uint256).max, 300);
+        t[0] = SnapsettleResolver.Tier(_t0Max(), _d(0));
+        t[1] = SnapsettleResolver.Tier(_t1Max(), _d(1));
+        t[2] = SnapsettleResolver.Tier(type(uint256).max, _d(2));
         vm.startBroadcast();
         SnapsettleResolver resolver = new SnapsettleResolver(escrow, LASNA, rc, loop, t);
         vm.stopBroadcast();

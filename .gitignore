@@ -7,3 +7,5 @@ node_modules/
 *.log
 .DS_Store
 dashboard/dist/
+contracts/deployments/local/*.json
+.local/

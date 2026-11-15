@@ -29,7 +29,7 @@ forge script script/Deploy.s.sol:WireReactive      --rpc-url lasna            --
 forge script script/Deploy.s.sol:DeployResolver    --rpc-url base_sepolia     --account snapsettle-deployer --broadcast   # LOOP_LATENCY=<measured p95>
 ```
 
-Addresses land in `contracts/deployments/{1-destination,2-reactive,3-origin}.json`.
+Addresses land in `contracts/deployments/live/{1-destination,2-reactive,3-origin,5-resolver}.json`.
 
 Order matters: the escrow needs the reactive contract's address (immutable callback sender), and the reactive contract needs the escrow's address to subscribe. Step 4 closes the loop.
 
