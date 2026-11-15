@@ -9,3 +9,4 @@ node_modules/
 dashboard/dist/
 contracts/deployments/local/*.json
 .local/
+evidence/local/

@@ -7,6 +7,8 @@ Resume here. Update after every milestone.
 
 - 2026-11-15: ERC-7683 resolver (`SnapsettleResolver`, resolver-centric Draft): one Call step (fill), PaymentRecipient variable, ERC20 payment from the escrow with `estimatedDelaySeconds` = tier + loop latency, named assumptions `reactive-settlement` and `reactive-origin-finality`. ERC-7930 interop addresses (matches spec example). Escrow now stores the terms hash. 28 tests pass, including a generic solver that executes only the resolved order and gets paid. Deploy step 5 added.
 
+- 2026-11-15: Off-chain package `offchain/` (viem + tsx): generic ERC-7683 solver (resolves orders via the resolver, vets named assumptions, executes the resolved step), bench (per-segment block-ts + wall-clock p50/p95, tx hashes to evidence/), negative-case runner, local Reactive relay (LOCAL only). Local three-chain harness `scripts/local-up.sh` (anvil ×3, real chain IDs, Base 200 ms blocks). LOCAL results: tier 0 3/3 settled, tier 1 2/2 settled via Cron10, all 4 negative cases PASS. Tiers env-configurable; testnet defaults ≤1 USDC instant / ≤10 USDC 30 s / >10 USDC 300 s; refund grace 60 s.
+
 ## Next
 1. Local three-chain harness (anvil ×3 + TS Reactive relay) → solver bot + bench + dashboard, all working locally.
 3. When the owner has funded `snapsettle-deployer`: deploy (docs/03-deploy.md), verify, live feasibility loop, then 50+ loops per tier and negative cases.
