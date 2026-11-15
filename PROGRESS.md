@@ -16,7 +16,7 @@ Resume here. Update after every milestone.
 - 2026-11-15: Video pipeline `pnpm record` (Playwright 1920×1080, captions injected as an overlay since this ffmpeg has no text filters, one real order mid-recording, h264_videotoolbox MP4 capped 2:55). docs/VIDEO.md script.
 
 ## Next
-1. Finish review verdict → DESIGN.md via the impeccable documenter.
+1. Dashboard finish review: SHIP (two rounds, all material fixes resolved). DESIGN.md via the documenter (running). Detector false positive (flat-type-hierarchy on index.html without its stylesheet) suppressed narrowly in .impeccable/config.json.
 2. Test-record a LOCAL video to validate the pipeline (not for submission).
 3. LIVE (blocked on owner funding): deploy 5 steps (docs/03-deploy.md, env TIER0_MAX/TIER1_MAX defaults, REFUND_GRACE=60, LOOP_LATENCY = measured p95 later), verify sources, run solver + bench 50+ loops per tier, negative cases, `SNAP_ENV=live pnpm judge`, rebuild dashboard data.
 4. Public repo MeghVyas3132/snapsettle (~28 Nov), Pages deploy, submission on DoraHacks.
