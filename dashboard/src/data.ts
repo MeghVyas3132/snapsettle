@@ -165,6 +165,11 @@ class Store {
     return out;
   }
 
+  /** The newest single run of a tier: for legs that depend on the solver's version (open → fill, whole loop). */
+  newestRun(tier: number): Run | undefined {
+    return this.evidence.runs.filter((r) => r.tier === tier && r.ok > 0 && !r.note).sort((a, b) => a.run.localeCompare(b.run)).pop();
+  }
+
   tierOf(amount: bigint | null): number | null {
     if (amount === null || !this.tiers.length) return null;
     const i = this.tiers.findIndex((t) => amount <= t.maxAmount);

@@ -60,8 +60,8 @@ function renderNotes() {
   const a = store.config.addresses;
   const run0 = store.latestRun(0);
   const f = statMs(run0, LEGS.fillToRepaid);
-  const full = statMs(run0, LEGS.full);
-  const o2f = statMs(run0, LEGS.openToFill);
+  const full = statMs(store.newestRun(0), LEGS.full);
+  const o2f = statMs(store.newestRun(0), LEGS.openToFill);
   const f2s = statMs(run0, LEGS.fillToSeen);
   const r2r = statMs(run0, LEGS.requestToRepaid);
   const pp = (s?: { p50: number; p95: number }, cross = false) =>
@@ -112,12 +112,14 @@ function renderHero() {
 
 function renderLegs() {
   const run = store.latestRun(0);
+  // Solver-dependent legs come from the newest run (current solver); Reactive's legs are pooled over every run.
+  const cur = store.newestRun(0);
   const rows: Array<[string, string, ReturnType<typeof statMs>, boolean]> = [
-    ["Open → fill", "solver's own receipt", statMs(run, LEGS.openToFill), false],
+    ["Open → fill", "our solver's own receipt · current solver", statMs(cur, LEGS.openToFill), false],
     ["Fill → seen on Lasna", "observer via public RPC, upper bound", statMs(run, LEGS.fillToSeen), true],
     ["Settle request → repaid", "chain block times", statMs(run, LEGS.requestToRepaid), true],
     ["Fill → solver repaid", "chain block times", statMs(run, LEGS.fillToRepaid), true],
-    ["Open → repaid", "counted in Base blocks, 200 ms each", statMs(run, LEGS.full), false],
+    ["Open → repaid", "whole loop in Base blocks (200 ms) · current solver", statMs(cur, LEGS.full), false],
   ];
   const cell = (v: number, cross: boolean) => {
     const t = cross ? crossChain(v) : fmtS(v);
@@ -126,7 +128,7 @@ function renderLegs() {
   if (put("legs", rows
     .map(([name, how, s, cross]) => `<div class="leg"><dt>${name}<small>${how}</small></dt><dd><span>${s ? cell(s.p50 / 1000, cross) : "—"}</span><span class="p95">${s ? cell(s.p95 / 1000, cross) : "—"}</span></dd></div>`)
     .join(""))) tickers($("legs"));
-  put("legs-src", run ? `p50 · p95 · ${run.ok}/${run.n} loops settled · run <span class="mono">${esc(run.run)}</span>` : "");
+  put("legs-src", run ? `p50 · p95 · Reactive legs pooled over ${run.ok}/${run.n} settled loops (${esc(run.run)}); solver legs from run <span class="mono">${esc(cur?.run ?? "")}</span>, ${cur?.ok}/${cur?.n} settled` : "");
 }
 
 let activeTier = -1;

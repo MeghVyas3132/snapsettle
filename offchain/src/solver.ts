@@ -26,6 +26,16 @@ function parseInterop(b: Hex): { chainId: bigint; address: Address } {
 /** Strips the ERC-7683 framing ("", value) from a static value. */
 const unframe = (framed: Hex): Hex => slice(framed, 32, size(framed) - 32);
 
+// A fill uses ~88k gas on Unichain Sepolia; a fixed cap skips eth_estimateGas on the hot path.
+const FILL_GAS = 160_000n;
+// Fees are refreshed in the background so a fill never waits on fee lookups.
+let fees: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } = { maxFeePerGas: 0n, maxPriorityFeePerGas: 0n };
+async function refreshFees() {
+  const f = await pub.dest.estimateFeesPerGas();
+  // 2x headroom on the base fee so a cached value stays valid for a few blocks.
+  fees = { maxFeePerGas: f.maxFeePerGas * 2n, maxPriorityFeePerGas: f.maxPriorityFeePerGas };
+}
+
 async function fillOrder(orderId: Hex, order: OrderData, seenAt: number) {
   const resolved = (await pub.origin.readContract({
     address: addr.resolver, abi: abi.resolver, functionName: "resolve",
@@ -50,7 +60,8 @@ async function fillOrder(orderId: Hex, order: OrderData, seenAt: number) {
     data = (data + piece.slice(2)) as Hex;
   }
 
-  const hash = await solverDest.sendTransaction({ to: target.address, data, chain: chains.dest, account: solverDest.account! });
+  // One round trip: gas, fees and nonce are already known, so viem only signs and sends.
+  const hash = await solverDest.sendTransaction({ to: target.address, data, chain: chains.dest, account: solverDest.account!, gas: FILL_GAS, ...fees });
   const sentAt = now();
   const r = await pub.dest.waitForTransactionReceipt({ hash, pollingInterval: 100 });
   const minedAt = now(); // the solver's own receipt time: the most precise wall-clock fill time we have
@@ -68,38 +79,47 @@ async function ensureAllowance() {
 
 async function main() {
   await ensureAllowance();
-  console.log(`solver (${ENV}) ${solverAddr}, repay to ${repayTo}`);
+  await refreshFees();
+  setInterval(() => void refreshFees().catch(() => undefined), 5_000);
+  // Prime the nonce manager so the first fill does not pay for a nonce lookup.
+  await pub.dest.getTransactionCount({ address: solverAddr, blockTag: "pending" });
+  console.log(`solver (${ENV}) ${solverAddr}, repay to ${repayTo}; parallel fills, fixed gas, cached fees`);
   let from = await pub.origin.getBlockNumber();
-  const queue: Array<{ id: Hex; order: OrderData; seenAt: number }> = [];
   const seen = new Set<Hex>();
-  let busy = false;
+  let idle = 0;
 
   // A failed RPC call skips this poll; it must never stop the solver.
   const scan = async () => {
-    const head = await pub.origin.getBlockNumber();
-    const to = head - from > 190n ? from + 190n : head; // Base Sepolia's public RPC rejects getLogs over 200 blocks
-    if (to > from) {
-      const logs = await pub.origin.getContractEvents({ address: addr.escrow, abi: abi.escrow, eventName: "Opened", fromBlock: from + 1n, toBlock: to });
-      for (const l of logs) {
-        const a = l.args as { orderId: Hex; order: OrderData };
-        if (seen.has(a.orderId)) continue;
-        seen.add(a.orderId);
-        if (process.env.SOLVER_SKIP_ABOVE && a.order.inputAmount > BigInt(process.env.SOLVER_SKIP_ABOVE)) continue;
-        queue.push({ id: a.orderId, order: a.order, seenAt: now() });
-      }
-      from = to > 10n ? to - 10n : 0n; // re-scan a few blocks: a load-balanced RPC can lag its own head
+    // One call per poll: logs up to the head, from a cursor that re-scans the last few blocks.
+    const logs = await pub.origin.getContractEvents({ address: addr.escrow, abi: abi.escrow, eventName: "Opened", fromBlock: from + 1n, toBlock: "latest" });
+    let top = from;
+    for (const l of logs) {
+      if (l.blockNumber! > top) top = l.blockNumber!;
+      const a = l.args as { orderId: Hex; order: OrderData };
+      if (seen.has(a.orderId)) continue;
+      seen.add(a.orderId);
+      if (process.env.SOLVER_SKIP_ABOVE && a.order.inputAmount > BigInt(process.env.SOLVER_SKIP_ABOVE)) continue;
+      // Every order fills at once, in parallel: no queue behind a slower one.
+      const seenAt = now();
+      fillOrder(a.orderId, a.order, seenAt).catch((e) => console.error(`skip ${a.orderId.slice(0, 10)}: ${(e as Error).message.split("\n")[0]}`));
     }
+    // Advance the cursor; if the RPC is far ahead of it, catch up in ranges it accepts (Base: 200 blocks).
+    // With no new logs, look up the head only every 20th poll so the hot loop stays one call.
+    if (!logs.length && ++idle % 20 !== 0) return;
+    const head = logs.length ? top : await pub.origin.getBlockNumber();
+    const next = head > 10n ? head - 10n : 0n;
+    if (next > from) from = next > from + 180n ? from + 180n : next;
   };
 
   for (;;) {
-    await scan().catch((e) => console.error(`scan failed, retrying: ${(e as Error).message.split("\n")[0]}`));
-    if (!busy && queue.length) {
-      busy = true;
-      const job = queue.shift()!;
-      fillOrder(job.id, job.order, job.seenAt)
-        .catch((e) => console.error(`skip ${job.id.slice(0, 10)}: ${(e as Error).message.split("\n")[0]}`))
-        .finally(() => (busy = false));
-    }
+    await scan().catch(async (e) => {
+      const msg = (e as Error).message.split("\n")[0];
+      // A range the RPC refuses means the cursor fell behind: jump it to the head and keep going.
+      if (/limited to|range|413/i.test(msg)) {
+        const h = await pub.origin.getBlockNumber().catch(() => from);
+        from = h > 190n ? h - 190n : 0n;
+      } else console.error(`scan failed, retrying: ${msg}`);
+    });
     await sleep(100);
   }
 }
