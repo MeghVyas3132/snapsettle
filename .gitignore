@@ -16,3 +16,4 @@ dashboard/public/data/
 video/raw/
 video/*.mp4
 .secrets/
+.live/

@@ -16,6 +16,7 @@ export type LoopRow = {
 export const SEGMENTS: Array<[key: string, label: string]> = [
   ["fillToSettle_ms", "fill → solver repaid (Reactive settlement), wall ms"],
   ["full_ms", "open sent → solver repaid (full loop), wall ms"],
+  ["fullBase_ms", "open → repaid in Base Sepolia blocks × 200 ms (origin clock, no RPC lag)"],
   ["openToFill_ms", "open mined → fill seen (solver), wall ms"],
   ["fillToReact_ms", "fill seen → FillAccepted on Lasna, wall ms"],
   ["reactToSettle_ms", "settle requested → Settled on origin, wall ms"],
@@ -57,7 +58,7 @@ export function renderSummaryMd(env: string, tier: number, amount: bigint, rows:
     "|---|---|---|---|---|---|",
     ...SEGMENTS.map(([k, label]) => `| ${label} | ${s[k].n} | ${s[k].min} | ${s[k].p50} | ${s[k].p95} | ${s[k].max} |`),
     "",
-    "Wall-clock segments are first-seen times on one machine, polling public RPCs every ~150 ms (an upper bound on the true latency). Block-timestamp segments use each chain's own clock (1 s granularity).",
+    "Wall-clock segments: the fill time is the solver's own transaction receipt; every other event is when this machine first saw it, polling public RPCs every ~150 ms. A lagging RPC can make a segment read short or even negative, so treat single loops with care and read p50/p95. Block-timestamp segments use each chain's own clock (1 s granularity; clocks across chains differ by about ±1 s). The Base-blocks row counts origin blocks between open and repay (200 ms each), the most RPC-independent measure.",
     "",
     "## Loops",
     "",

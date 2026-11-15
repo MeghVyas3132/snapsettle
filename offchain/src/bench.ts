@@ -6,7 +6,22 @@ import { maxUint256, parseEventLogs, type Hex } from "viem";
 import { ENV, chains, pub, addr, abi, wallet, evidenceDir, appendJsonl, writeJson, sleep, now, txLink, type OrderData } from "./common.ts";
 import { EventHub, type Sighting } from "./hub.ts";
 import { summarize, renderSummaryMd, SEGMENTS, type LoopRow } from "./stats.ts";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
+
+/** The solver's own receipt time for a fill (same machine), more precise than a lagging public RPC. */
+function solverFillMs(orderId: Hex): number | undefined {
+  const f = `${evidenceDir("solver")}/fills.jsonl`;
+  if (!existsSync(f)) return undefined;
+  for (const l of readFileSync(f, "utf8").trim().split("\n").reverse()) {
+    try {
+      const r = JSON.parse(l) as { orderId: string; minedSeenAtMs?: number; status?: string };
+      if (r.orderId.toLowerCase() === orderId.toLowerCase() && r.status === "success") return r.minedSeenAtMs;
+    } catch {
+      /* skip partial lines */
+    }
+  }
+  return undefined;
+}
 
 const argv = process.argv.slice(2);
 const opt = (k: string, d: string) => {
@@ -106,13 +121,16 @@ async function oneLoop(i: number, amount: bigint, hub: EventHub): Promise<LoopRo
   const accepted = filled && (await hub.waitFor("FillAccepted", orderId, TIMEOUT_MS));
   const requested = accepted && (await hub.waitFor("SettlementRequested", orderId, TIMEOUT_MS));
   const settled = requested && (await hub.waitFor("Settled", orderId, TIMEOUT_MS));
+  const fillAt = solverFillMs(orderId) ?? filled?.seenAtMs;
+  // Base Sepolia produces a block every 200 ms: block-count deltas on the origin are the finest clock we have.
+  const baseBlocksFull = settled ? Number(settled.block - opened.block) : null;
 
   const row: LoopRow = {
     i, env: ENV, tier: TIER, orderId, amount: amount.toString(), ok: Boolean(settled),
     tx: { open: hash, fill: filled?.tx, react: accepted?.tx, settleRequest: requested?.tx, settle: settled?.tx },
     blocks: { open: opened.block, fill: filled?.block, react: accepted?.block, settleRequest: requested?.block, settle: settled?.block },
     blockTs: { open: opened.blockTs, fill: filled?.blockTs, react: accepted?.blockTs, settleRequest: requested?.blockTs, settle: settled?.blockTs },
-    seenAtMs: { openSent: sentAt, open: minedSeenAt, fill: filled?.seenAtMs, react: accepted?.seenAtMs, settleRequest: requested?.seenAtMs, settle: settled?.seenAtMs },
+    seenAtMs: { openSent: sentAt, open: minedSeenAt, fill: fillAt, fillRpc: filled?.seenAtMs, react: accepted?.seenAtMs, settleRequest: requested?.seenAtMs, settle: settled?.seenAtMs },
     seg: {
       // block-timestamp segments (seconds; each chain's own clock, 1 s granularity)
       openToFill_s: sec(opened, filled),
@@ -121,11 +139,14 @@ async function oneLoop(i: number, amount: bigint, hub: EventHub): Promise<LoopRo
       fillToSettle_s: sec(filled, settled),
       full_s: sec(opened, settled),
       // wall-clock segments (ms; first seen by this machine via public RPC polling)
-      openToFill_ms: ms(minedSeenAt, filled?.seenAtMs),
-      fillToReact_ms: ms(filled?.seenAtMs, accepted?.seenAtMs),
+      openToFill_ms: ms(minedSeenAt, fillAt),
+      fillToReact_ms: ms(fillAt, accepted?.seenAtMs),
       reactToSettle_ms: ms(requested?.seenAtMs, settled?.seenAtMs),
-      fillToSettle_ms: ms(filled?.seenAtMs, settled?.seenAtMs),
+      fillToSettle_ms: ms(fillAt, settled?.seenAtMs),
       full_ms: ms(sentAt, settled?.seenAtMs),
+      // open → repaid counted in Base Sepolia blocks (200 ms each), independent of any RPC lag
+      fullBase_blocks: baseBlocksFull,
+      fullBase_ms: baseBlocksFull === null ? null : baseBlocksFull * 200,
     },
   };
   appendJsonl(rowsFile, row);

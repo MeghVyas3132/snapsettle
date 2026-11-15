@@ -51,12 +51,18 @@ async function fillOrder(orderId: Hex, order: OrderData, seenAt: number) {
   }
 
   const hash = await solverDest.sendTransaction({ to: target.address, data, chain: chains.dest, account: solverDest.account! });
+  const sentAt = now();
   const r = await pub.dest.waitForTransactionReceipt({ hash, pollingInterval: 100 });
-  const block = await pub.dest.getBlock({ blockNumber: r.blockNumber });
-  appendJsonl(log, {
-    orderId, status: r.status, fillTx: hash, fillBlock: r.blockNumber, fillBlockTs: block.timestamp,
-    seenAtMs: seenAt, sentAtMs: now(), minedSeenAtMs: now(),
-  });
+  const minedAt = now(); // the solver's own receipt time: the most precise wall-clock fill time we have
+  let blockTs: bigint | undefined;
+  for (let i = 0; i < 10 && blockTs === undefined; i++) {
+    try {
+      blockTs = (await pub.dest.getBlock({ blockNumber: r.blockNumber })).timestamp;
+    } catch {
+      await sleep(300); // public RPC nodes can lag the receipt by a block
+    }
+  }
+  appendJsonl(log, { orderId, status: r.status, fillTx: hash, fillBlock: r.blockNumber, fillBlockTs: blockTs, seenAtMs: seenAt, sentAtMs: sentAt, minedSeenAtMs: minedAt });
   console.log(`filled ${orderId.slice(0, 10)} ${r.status} ${hash}`);
 }
 
