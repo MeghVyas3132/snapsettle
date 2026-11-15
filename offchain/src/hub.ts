@@ -2,7 +2,7 @@
 // block number, block timestamp, tx hash and the local wall-clock time it was first observed.
 // Shared by the bench and the negative-case runner so public RPCs are not hammered per order.
 import { type Abi, type Address, type Hex, type PublicClient } from "viem";
-import { pub, addr, abi, sleep, now } from "./common.ts";
+import { pub, addr, abi, sleep, now, blockTs } from "./common.ts";
 
 export type Sighting = { block: bigint; blockTs: bigint; tx: Hex; seenAtMs: number; args: Record<string, unknown> };
 type Key = string; // `${event}:${orderId}`
@@ -25,7 +25,7 @@ class ChainWatcher {
   private async ts(block: bigint): Promise<bigint> {
     let t = this.tsCache.get(block);
     if (t === undefined) {
-      t = (await this.client.getBlock({ blockNumber: block })).timestamp;
+      t = await blockTs(this.client, block);
       this.tsCache.set(block, t);
     }
     return t;
@@ -47,7 +47,9 @@ class ChainWatcher {
         this.sink.set(key, { block: l.blockNumber!, blockTs: await this.ts(l.blockNumber!), tx: l.transactionHash!, seenAtMs: seen, args });
       }
     }
-    this.from = to;
+    // Re-scan the last few blocks on the next poll: a load-balanced RPC can report a head its log index has not
+    // reached yet, and moving the cursor past those blocks would drop their events. Sightings are deduplicated.
+    this.from = to > 10n ? to - 10n : 0n;
   }
 }
 

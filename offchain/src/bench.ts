@@ -3,7 +3,7 @@
 //   pnpm bench --tier 0 --n 50 [--concurrency 3] [--gap 2000]
 // Output: evidence/<env>/bench-tier<k>-<stamp>/{loops.jsonl,summary.json,summary.md}
 import { maxUint256, parseEventLogs, type Hex } from "viem";
-import { ENV, chains, pub, addr, abi, wallet, evidenceDir, appendJsonl, writeJson, sleep, now, txLink, type OrderData } from "./common.ts";
+import { ENV, chains, pub, addr, abi, wallet, evidenceDir, appendJsonl, writeJson, sleep, now, txLink, blockTs, type OrderData } from "./common.ts";
 import { EventHub, type Sighting } from "./hub.ts";
 import { summarize, renderSummaryMd, SEGMENTS, type LoopRow } from "./stats.ts";
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
@@ -114,8 +114,7 @@ async function oneLoop(i: number, amount: bigint, hub: EventHub): Promise<LoopRo
   const minedSeenAt = now();
   const ev = parseEventLogs({ abi: abi.escrow, logs: rcpt.logs, eventName: "Opened" })[0];
   const orderId = (ev.args as { orderId: Hex }).orderId;
-  const openBlock = await pub.origin.getBlock({ blockNumber: rcpt.blockNumber });
-  const opened: Sighting = { block: rcpt.blockNumber, blockTs: openBlock.timestamp, tx: hash, seenAtMs: minedSeenAt, args: {} };
+  const opened: Sighting = { block: rcpt.blockNumber, blockTs: await blockTs(pub.origin, rcpt.blockNumber), tx: hash, seenAtMs: minedSeenAt, args: {} };
 
   const filled = await hub.waitFor("Filled", orderId, TIMEOUT_MS);
   const accepted = filled && (await hub.waitFor("FillAccepted", orderId, TIMEOUT_MS));
@@ -168,7 +167,13 @@ async function main() {
   const worker = async () => {
     while (next < N) {
       const i = next++;
-      rows.push(await oneLoop(i, amount, hub));
+      try {
+        rows.push(await oneLoop(i, amount, hub));
+      } catch (e) {
+        const msg = (e as Error).message.split("\n")[0];
+        console.error(`#${i} failed: ${msg}`);
+        appendJsonl(`${dir}/errors.jsonl`, { i, error: msg, at: new Date().toISOString() });
+      }
       await sleep(GAP);
     }
   };

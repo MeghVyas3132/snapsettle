@@ -184,3 +184,17 @@ export const now = () => Date.now();
 export function txLink(chain: keyof typeof explorers, hash: string): string {
   return `${explorers[chain]}/tx/${hash}`;
 }
+
+/** Block timestamp with retries: public RPC nodes behind a load balancer can lag the node that served the receipt. */
+export async function blockTs(client: PublicClient, blockNumber: bigint): Promise<bigint> {
+  let last: unknown;
+  for (let i = 0; i < 20; i++) {
+    try {
+      return (await client.getBlock({ blockNumber })).timestamp;
+    } catch (e) {
+      last = e;
+      await sleep(250 + i * 150);
+    }
+  }
+  throw last;
+}

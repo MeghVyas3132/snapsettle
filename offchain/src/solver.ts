@@ -3,7 +3,7 @@
 // against its whitelist, builds the fill call from the resolved step, and executes it from its own inventory.
 // Repayment arrives on the origin chain when Reactive observes the fill.
 import { decodeFunctionData, encodeAbiParameters, hexToBigInt, maxUint256, size, slice, type Address, type Hex } from "viem";
-import { ENV, chains, pub, addr, abi, wallet, ORDER_TUPLE, evidenceDir, appendJsonl, sleep, now, type OrderData } from "./common.ts";
+import { ENV, chains, pub, addr, abi, wallet, ORDER_TUPLE, evidenceDir, appendJsonl, sleep, now, blockTs, type OrderData } from "./common.ts";
 
 const solverDest = wallet("solver", "dest");
 const solverAddr = solverDest.account!.address;
@@ -54,15 +54,8 @@ async function fillOrder(orderId: Hex, order: OrderData, seenAt: number) {
   const sentAt = now();
   const r = await pub.dest.waitForTransactionReceipt({ hash, pollingInterval: 100 });
   const minedAt = now(); // the solver's own receipt time: the most precise wall-clock fill time we have
-  let blockTs: bigint | undefined;
-  for (let i = 0; i < 10 && blockTs === undefined; i++) {
-    try {
-      blockTs = (await pub.dest.getBlock({ blockNumber: r.blockNumber })).timestamp;
-    } catch {
-      await sleep(300); // public RPC nodes can lag the receipt by a block
-    }
-  }
-  appendJsonl(log, { orderId, status: r.status, fillTx: hash, fillBlock: r.blockNumber, fillBlockTs: blockTs, seenAtMs: seenAt, sentAtMs: sentAt, minedSeenAtMs: minedAt });
+  const fillTs = await blockTs(pub.dest, r.blockNumber).catch(() => undefined);
+  appendJsonl(log, { orderId, status: r.status, fillTx: hash, fillBlock: r.blockNumber, fillBlockTs: fillTs, seenAtMs: seenAt, sentAtMs: sentAt, minedSeenAtMs: minedAt });
   console.log(`filled ${orderId.slice(0, 10)} ${r.status} ${hash}`);
 }
 
@@ -78,6 +71,7 @@ async function main() {
   console.log(`solver (${ENV}) ${solverAddr}, repay to ${repayTo}`);
   let from = await pub.origin.getBlockNumber();
   const queue: Array<{ id: Hex; order: OrderData; seenAt: number }> = [];
+  const seen = new Set<Hex>();
   let busy = false;
 
   for (;;) {
@@ -86,10 +80,12 @@ async function main() {
       const logs = await pub.origin.getContractEvents({ address: addr.escrow, abi: abi.escrow, eventName: "Opened", fromBlock: from + 1n, toBlock: to });
       for (const l of logs) {
         const a = l.args as { orderId: Hex; order: OrderData };
+        if (seen.has(a.orderId)) continue;
+        seen.add(a.orderId);
         if (process.env.SOLVER_SKIP_ABOVE && a.order.inputAmount > BigInt(process.env.SOLVER_SKIP_ABOVE)) continue;
         queue.push({ id: a.orderId, order: a.order, seenAt: now() });
       }
-      from = to;
+      from = to > 10n ? to - 10n : 0n; // re-scan a few blocks: a load-balanced RPC can lag its own head
     }
     if (!busy && queue.length) {
       busy = true;
