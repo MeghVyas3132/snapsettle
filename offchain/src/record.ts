@@ -21,9 +21,9 @@ async function caption(page: Page, text: string) {
       el = document.createElement("div");
       el.id = "__cap";
       Object.assign(el.style, {
-        position: "fixed", left: "50%", bottom: "44px", transform: "translateX(-50%)", maxWidth: "1500px",
+        position: "fixed", left: "50%", bottom: "44px", transform: "translateX(-50%)", maxWidth: "1180px",
         padding: "16px 28px", background: "rgba(46,30,20,0.94)", color: "#f8f8ea", borderRadius: "8px",
-        font: "500 30px/1.35 Barlow, system-ui, sans-serif", textAlign: "center", zIndex: "9999",
+        font: "500 24px/1.35 Barlow, system-ui, sans-serif", textAlign: "center", zIndex: "9999",
         boxShadow: "0 18px 32px -18px rgba(0,0,0,0.6)", transition: "opacity 300ms ease-out",
       });
       document.body.appendChild(el);
@@ -50,7 +50,8 @@ async function moves(page: Page): Promise<number> {
 
 async function main() {
   const browser = await chromium.launch();
-  const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, recordVideo: { dir: RAW, size: { width: 1920, height: 1080 } } });
+  // A 1440×810 viewport (the dashboard's design width) upscaled into a 1080p frame fills the picture.
+  const context = await browser.newContext({ viewport: { width: 1440, height: 810 }, deviceScaleFactor: 2, recordVideo: { dir: RAW, size: { width: 1920, height: 1080 } } });
   const page = await context.newPage();
   await page.goto(URL, { waitUntil: "networkidle" });
   await sleep(2500);
