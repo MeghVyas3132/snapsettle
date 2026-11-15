@@ -120,6 +120,7 @@ class Store {
     if (!this.envs.includes(this.env)) this.env = this.envs[0] ?? "live";
     this.config = (await loadJson<Config>(`${DATA}/config.${this.env}.json`))!;
     this.evidence = (await loadJson<Evidence>(`${DATA}/evidence.${this.env}.json`)) ?? { env: this.env, runs: [], negatives: [] };
+    this.pooledCache.clear();
     const mk = (url: string) => createPublicClient({ transport: http(url, { batch: { batchSize: 20, wait: 50 }, retryCount: 4, retryDelay: 600 }) }) as PublicClient;
     this.clients = { origin: mk(this.config.rpc.origin), dest: mk(this.config.rpc.dest), lasna: mk(this.config.rpc.lasna) };
     this.tiers = [];
@@ -138,11 +139,30 @@ class Store {
 
   // ------------------------------------------------------------ derived
 
-  /** The latest run of a tier with at least one settled loop; a complete run beats a partial one. */
+  private pooledCache = new Map<number, Run | undefined>();
+  /**
+   * Every settled live loop of a tier, pooled across its bench runs (same contracts, same policy), with p50/p95
+   * recomputed over the pooled loops. Each run stays listed in the evidence; `run` names how many were pooled.
+   */
   latestRun(tier: number): Run | undefined {
-    const runs = this.evidence.runs.filter((r) => r.tier === tier && r.ok > 0);
-    const full = runs.filter((r) => !r.note);
-    return (full.length ? full : runs).sort((a, b) => a.run.localeCompare(b.run)).pop();
+    if (this.pooledCache.has(tier)) return this.pooledCache.get(tier);
+    const runs = this.evidence.runs.filter((r) => r.tier === tier && r.ok > 0).sort((a, b) => a.run.localeCompare(b.run));
+    let out: Run | undefined;
+    if (runs.length) {
+      const loops = runs.flatMap((r) => r.loops);
+      const ok = loops.filter((l) => l.ok);
+      const keys = new Set(runs.flatMap((r) => Object.keys(r.summary)));
+      const summary: Record<string, Stat> = {};
+      for (const k of keys) {
+        const v = ok.map((l) => l.seg[k]).filter((x): x is number => typeof x === "number").sort((a, b) => a - b);
+        const pct = (p: number) => v[Math.min(v.length - 1, Math.max(0, Math.ceil((p / 100) * v.length) - 1))];
+        summary[k] = { n: v.length, min: v[0] ?? NaN, p50: v.length ? pct(50) : NaN, p95: v.length ? pct(95) : NaN, max: v[v.length - 1] ?? NaN };
+      }
+      const last = runs[runs.length - 1];
+      out = { ...last, run: runs.length === 1 ? last.run : `${runs.length} runs pooled`, n: loops.length, ok: ok.length, summary, loops };
+    }
+    this.pooledCache.set(tier, out);
+    return out;
   }
 
   tierOf(amount: bigint | null): number | null {
