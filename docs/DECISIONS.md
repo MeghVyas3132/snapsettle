@@ -19,3 +19,7 @@
 - **Deployer wallet and faucets are the owner's job.** Agents must not create or handle keys, and faucets sit behind CAPTCHAs.
 - **Testnet finality tiers: ≤ 1 USDC on sight, ≤ 10 USDC after 30 s, above after 300 s** (env-overridable in the deploy script). Reason: the bench must run 50+ loops per tier on faucet-funded Circle USDC; the shape of the policy (instant / short / long) is what the evidence needs to show, not mainnet-sized thresholds.
 - **Refund grace 60 s.** It must exceed the worst fill→observation lag (seconds) with a wide margin, and it must be short enough to show "refund ignored after a valid fill" on-chain: a 300 s-tier order filled at once is still queued when the refund window opens.
+
+## 2026-11-15 (live setup)
+- **Agent-created testnet wallets** (owner approved in chat): deployer, user and solver generated with `cast wallet new`. Keys are only in gitignored files (`.secrets/deployer.env`, `offchain/.env`, mode 600) and are never printed. The owner funds the deployer alone; `pnpm fund distribute` hands gas and USDC to the user and solver and buys lREACT from the faucet.
+- **Live tier thresholds lowered to ≤ 0.5 USDC on sight, ≤ 2 USDC after 30 s, above after 300 s** (bench amounts 0.25 / 1.25 / 2.5). Reason: 150+ live loops on faucet USDC. With automatic rebalancing (the solver's Base USDC goes back to the user, the user's Unichain USDC back to the solver), ~10 USDC per chain covers every tier.

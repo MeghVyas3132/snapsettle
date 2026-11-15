@@ -9,7 +9,8 @@
     "negative": "tsx src/negative.ts",
     "typecheck": "tsc --noEmit",
     "judge": "tsx src/judge.ts",
-    "record": "tsx src/record.ts"
+    "record": "tsx src/record.ts",
+    "fund": "tsx src/fund.ts"
   },
   "dependencies": {
     "viem": "^2.57.19"

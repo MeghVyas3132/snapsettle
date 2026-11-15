@@ -18,6 +18,14 @@ import {
 import { privateKeyToAccount, nonceManager } from "viem/accounts";
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+// Keys live only in gitignored files (offchain/.env, .secrets/deployer.env); they are loaded, never printed.
+for (const f of [join(ROOT, "offchain/.env"), join(ROOT, ".secrets/deployer.env")]) {
+  try {
+    process.loadEnvFile(f);
+  } catch {
+    /* absent in local mode */
+  }
+}
 export const ENV = (process.env.SNAP_ENV ?? "local") as "local" | "live";
 if (ENV !== "local" && ENV !== "live") throw new Error(`SNAP_ENV must be local or live, got ${ENV}`);
 
@@ -57,7 +65,10 @@ export const pub = {
 
 function readDeployment(step: string, key: string): Address {
   const p = join(ROOT, "contracts/deployments", ENV, `${step}.json`);
-  if (!existsSync(p)) throw new Error(`missing ${p}: deploy first (docs/03-deploy.md or scripts/local-up.sh)`);
+  if (!existsSync(p)) {
+    if (process.env.SNAP_ALLOW_UNDEPLOYED) return "0x0000000000000000000000000000000000000000";
+    throw new Error(`missing ${p}: deploy first (docs/03-deploy.md or scripts/local-up.sh)`);
+  }
   return JSON.parse(readFileSync(p, "utf8"))[key] as Address;
 }
 
@@ -107,14 +118,19 @@ const ANVIL_KEYS = {
   solver: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
 } as const;
 
-function keyFor(role: "user" | "solver"): Hex {
-  if (ENV === "local") return ANVIL_KEYS[role] as Hex;
+function keyFor(role: "user" | "solver" | "deployer"): Hex {
+  if (ENV === "local" && role !== "deployer") return ANVIL_KEYS[role] as Hex;
+  if (role === "deployer") {
+    const d = process.env.DEPLOYER_PRIVATE_KEY;
+    if (!d) throw new Error("missing .secrets/deployer.env");
+    return d as Hex;
+  }
   const k = process.env[role === "user" ? "USER_PRIVATE_KEY" : "SOLVER_PRIVATE_KEY"];
   if (!k) throw new Error(`set ${role === "user" ? "USER_PRIVATE_KEY" : "SOLVER_PRIVATE_KEY"} in offchain/.env (never commit it)`);
   return k as Hex;
 }
 
-export function wallet(role: "user" | "solver", chain: keyof typeof chains): WalletClient {
+export function wallet(role: "user" | "solver" | "deployer", chain: keyof typeof chains): WalletClient {
   const rpc = { origin: RPC.origin, dest: RPC.dest, lasna: RPC.lasna }[chain];
   return createWalletClient({ account: privateKeyToAccount(keyFor(role), { nonceManager }), chain: chains[chain], transport: http(rpc) });
 }

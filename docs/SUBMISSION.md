@@ -23,7 +23,7 @@ Snapsettle lets Reactive be the check:
 
 Measured over «N» live loops: fill → solver repaid p50 «x» s / p95 «y» s for orders settled on sight.
 
-**Finality tiers.** These answer the question that ends Reactive's own post *Intents, Solvers, and Borrowed Certainty*. Reactive acts on what it observes even if a chain later reorganises, so each order carries an explicit policy: ≤ 1 USDC settles on sight, ≤ 10 USDC after 30 s, larger orders after 300 s. Solvers read it as `estimatedDelaySeconds` from our **ERC-7683 resolver** (resolver-centric Draft), next to the named assumptions `reactive-settlement` and `reactive-origin-finality`. Our solver bot is generic: it fills orders using only what the resolver returns.
+**Finality tiers.** These answer the question that ends Reactive's own post *Intents, Solvers, and Borrowed Certainty*. Reactive acts on what it observes even if a chain later reorganises, so each order carries an explicit policy: ≤ 0.5 USDC settles on sight, ≤ 2 USDC after 30 s, larger orders after 300 s (testnet thresholds; the mechanism is the point). Solvers read it as `estimatedDelaySeconds` from our **ERC-7683 resolver** (resolver-centric Draft), next to the named assumptions `reactive-settlement` and `reactive-origin-finality`. Our solver bot is generic: it fills orders using only what the resolver returns.
 
 **Refusals, on-chain:** a wrong-terms fill is not settled (the genuine fill still is), a late fill reverts, an unfilled order is refunded after its deadline, and a refund request after a valid fill is ignored.
 

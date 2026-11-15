@@ -24,7 +24,5 @@ Resume here. Update after every milestone.
 4. Public repo MeghVyas3132/snapsettle (~28 Nov), Pages deploy, submission on DoraHacks.
 
 ## Blockers (owner)
-- Deployer keystore `snapsettle-deployer` (`cast wallet new` → `cast wallet import snapsettle-deployer --interactive`) + funds: Base Sepolia ETH ~0.2, Unichain Sepolia ETH ~0.1, ~1 SepETH → lREACT faucet; Circle test USDC on both chains for a user wallet and a solver wallet (faucet.circle.com).
-- The owner runs the 5 deploy commands in docs/03-deploy.md (keystore password prompt). Agents never type passwords or keys.
-- `offchain/.env` with USER_PRIVATE_KEY and SOLVER_PRIVATE_KEY for two fresh testnet wallets, created by the owner (never pasted in chat), each with Base/Unichain Sepolia ETH for gas; USDC: user on Base Sepolia, solver on Unichain Sepolia.
+- Fund ONE address, the deployer `0x0510CB696e7796a456c24d0c291590E22AfDC1D5`, with: Base Sepolia ETH ≈ 0.25, Unichain Sepolia ETH ≈ 0.05, Circle test USDC ≈ 10 on Base Sepolia and ≈ 10 on Unichain Sepolia (faucet.circle.com). Everything else is scripted: `pnpm fund distribute`, then `scripts/deploy-live.sh`.
 - Track-fit question in t.me/reactivedevs (draft in ~/Desktop/Larp/reactive-omni-build-plan.md).

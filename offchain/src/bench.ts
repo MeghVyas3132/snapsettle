@@ -45,10 +45,43 @@ async function ensureAllowance() {
   await pub.origin.waitForTransactionReceipt({ hash });
 }
 
+// Keeps loops running on small faucet balances: when the user runs short on Base, USDC flows back
+// (solver's Base USDC → user, user's Unichain USDC → solver). Both wallets are the bench's own.
+let rebalancing: Promise<void> | null = null;
+async function ensureFunds(amount: bigint) {
+  const bal = (await pub.origin.readContract({ address: addr.tokenOrigin, abi: abi.erc20, functionName: "balanceOf", args: [userAddr] })) as bigint;
+  if (bal >= amount) return;
+  rebalancing ??= (async () => {
+    const solverO = wallet("solver", "origin");
+    const userD = wallet("user", "dest");
+    const sBal = (await pub.origin.readContract({ address: addr.tokenOrigin, abi: abi.erc20, functionName: "balanceOf", args: [solverO.account!.address] })) as bigint;
+    if (sBal > 0n) {
+      const h = await solverO.writeContract({ address: addr.tokenOrigin, abi: abi.erc20, functionName: "transfer", args: [userAddr, sBal], chain: chains.origin, account: solverO.account! });
+      await pub.origin.waitForTransactionReceipt({ hash: h });
+    }
+    const uBal = (await pub.dest.readContract({ address: addr.tokenDest, abi: abi.erc20, functionName: "balanceOf", args: [userAddr] })) as bigint;
+    if (uBal > 0n) {
+      const h = await userD.writeContract({ address: addr.tokenDest, abi: abi.erc20, functionName: "transfer", args: [solverO.account!.address, uBal], chain: chains.dest, account: userD.account! });
+      await pub.dest.waitForTransactionReceipt({ hash: h });
+    }
+    console.log(`rebalanced: ${sBal} back to user on Base, ${uBal} back to solver on Unichain`);
+  })().finally(() => (rebalancing = null));
+  await rebalancing;
+  // Settlements still in flight return funds later; wait for them rather than fail the loop.
+  for (let i = 0; i < 120; i++) {
+    const b = (await pub.origin.readContract({ address: addr.tokenOrigin, abi: abi.erc20, functionName: "balanceOf", args: [userAddr] })) as bigint;
+    if (b >= amount) return;
+    await sleep(5000);
+    if (i % 6 === 5) await ensureFunds(amount);
+  }
+  throw new Error("user has too little USDC on Base even after rebalancing");
+}
+
 const sec = (a?: Sighting, b?: Sighting) => (a && b ? Number(b.blockTs - a.blockTs) : null);
 const ms = (a?: number, b?: number) => (a !== undefined && b !== undefined ? b - a : null);
 
 async function oneLoop(i: number, amount: bigint, hub: EventHub): Promise<LoopRow> {
+  if (ENV === "live") await ensureFunds(amount);
   const fillDeadline = Math.floor(Date.now() / 1000) + DEADLINE_S;
   const order: OrderData = {
     inputToken: addr.tokenOrigin,

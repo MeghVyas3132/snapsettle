@@ -32,7 +32,7 @@ Judges open links from DoraHacks and verify on explorers: basescan (Base Sepolia
 ## Capabilities and Constraints
 
 - Contracts: OriginEscrow (Base Sepolia), DestinationSettler (Unichain Sepolia), SnapsettleReactive (Lasna), SnapsettleResolver (ERC-7683, Base Sepolia).
-- Finality tiers (testnet defaults): ≤ 1 USDC settles on sight, ≤ 10 USDC after 30 s, above after 300 s.
+- Finality tiers (testnet defaults): ≤ 0.5 USDC settles on sight, ≤ 2 USDC after 30 s, above after 300 s.
 - Two data modes: LIVE (testnets) and LOCAL (anvil harness with an emulated Reactive relay). LOCAL numbers must be labelled and never presented as live evidence.
 - No backend; public RPCs from the browser; must degrade gracefully when an RPC rate-limits.
 

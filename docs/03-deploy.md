@@ -2,7 +2,18 @@
 
 Testnets only. Run from `contracts/`. Never paste keys into files or chat; use a Foundry keystore.
 
-## 0. One-time setup (owner)
+## Fast path (used for this submission)
+
+Three testnet wallets exist on the build machine (keys only in gitignored `.secrets/deployer.env` and `offchain/.env`). The owner funds the **deployer** alone, then:
+
+```bash
+cd offchain
+SNAP_ENV=live SNAP_ALLOW_UNDEPLOYED=1 pnpm fund status       # balances
+SNAP_ENV=live SNAP_ALLOW_UNDEPLOYED=1 pnpm fund distribute   # gas + USDC to user/solver, lREACT via faucet
+cd .. && ./scripts/deploy-live.sh                             # five steps, key read from .secrets, never echoed
+```
+
+## 0. One-time setup (manual alternative)
 
 ```bash
 cast wallet new                                   # note the address, keep the key private

@@ -26,9 +26,9 @@ Snapsettle's answer, in working code: **make it a per-order property, written in
 
 | Order size (USDC) | Delay after the fill is observed | Why |
 |---|---|---|
-| ≤ 1 | 0 s | Loss on a vanished fill is tiny; speed is the product |
-| ≤ 10 | 30 s | Several destination blocks of margin |
-| > 10 | 300 s | The cautious end, still ~24× shorter than a 2 h optimistic window |
+| ≤ 0.5 | 0 s | Loss on a vanished fill is tiny; speed is the product |
+| ≤ 2 | 30 s | Several destination blocks of margin |
+| > 2 | 300 s | The cautious end, still ~24× shorter than a 2 h optimistic window |
 
 These thresholds are sized for faucet-funded testnet USDC (see DECISIONS.md). On mainnet they would be set per asset and per destination chain from that chain's observed reorg depth. The mechanism is the contribution; the numbers are a parameter.
 

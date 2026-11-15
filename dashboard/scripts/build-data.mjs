@@ -30,8 +30,8 @@ for (const env of envs) {
     env,
     // Deploy-script defaults (contracts/script/Deploy.s.sol), shown before the live contracts can be read.
     plannedTiers: [
-      { maxAmount: String(1e6), delay: 0 },
-      { maxAmount: String(10e6), delay: 30 },
+      { maxAmount: String(500000), delay: 0 },
+      { maxAmount: String(2000000), delay: 30 },
       { maxAmount: (2n ** 256n - 1n).toString(), delay: 300 },
     ],
     deployed: Boolean(escrow && dep(env, "2-reactive", "snapsettleReactive") && dep(env, "1-destination", "destinationSettler")),

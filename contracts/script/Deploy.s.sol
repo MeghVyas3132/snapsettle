@@ -28,13 +28,13 @@ abstract contract Base is Script {
     }
 
     /// @dev Finality tiers (token base units, 6 decimals). Defaults suit faucet-funded testnets:
-    ///      <= 1 USDC settles on sight, <= 10 USDC waits 30 s, above waits 300 s. Override with env.
+    ///      <= 0.5 USDC settles on sight, <= 2 USDC waits 30 s, above waits 300 s. Override with env.
     function _t0Max() internal view returns (uint256) {
-        return vm.envOr("TIER0_MAX", uint256(1e6));
+        return vm.envOr("TIER0_MAX", uint256(500_000));
     }
 
     function _t1Max() internal view returns (uint256) {
-        return vm.envOr("TIER1_MAX", uint256(10e6));
+        return vm.envOr("TIER1_MAX", uint256(2_000_000));
     }
 
     function _d(uint256 i) internal view returns (uint32) {
