@@ -7,6 +7,7 @@ import {
   createPublicClient,
   createWalletClient,
   defineChain,
+  fallback,
   http,
   type Abi,
   type Address,
@@ -31,14 +32,23 @@ if (ENV !== "local" && ENV !== "live") throw new Error(`SNAP_ENV must be local o
 
 // ---------------------------------------------------------------- chains
 
-const RPC = {
-  local: { origin: "http://127.0.0.1:8545", dest: "http://127.0.0.1:8546", lasna: "http://127.0.0.1:8547" },
+// Each live chain takes a comma-separated list of RPCs: the first is preferred (a private endpoint, e.g. Alchemy,
+// when configured), the public ones follow as automatic fallback, so one provider throttling never stops the bots.
+const list = (env: string | undefined, publics: string[]) => [...(env ?? "").split(",").map((s) => s.trim()).filter(Boolean), ...publics];
+const RPCS = {
+  local: { origin: ["http://127.0.0.1:8545"], dest: ["http://127.0.0.1:8546"], lasna: ["http://127.0.0.1:8547"] },
   live: {
-    origin: process.env.BASE_SEPOLIA_RPC ?? "https://sepolia.base.org",
-    dest: process.env.UNICHAIN_SEPOLIA_RPC ?? "https://sepolia.unichain.org",
-    lasna: process.env.LASNA_RPC ?? "https://lasna-rpc.rnk.dev/",
+    origin: list(process.env.BASE_SEPOLIA_RPC, ["https://sepolia.base.org", "https://base-sepolia-rpc.publicnode.com"]),
+    dest: list(process.env.UNICHAIN_SEPOLIA_RPC, ["https://sepolia.unichain.org", "https://unichain-sepolia-rpc.publicnode.com"]),
+    lasna: list(process.env.LASNA_RPC, ["https://lasna-rpc.rnk.dev/"]),
   },
 }[ENV];
+const RPC = { origin: RPCS.origin[0], dest: RPCS.dest[0], lasna: RPCS.lasna[0] };
+/** A transport over a chain's RPC list: each request goes to the first healthy endpoint, retried on the next. */
+export const transportFor = (chain: "origin" | "dest" | "lasna") => {
+  const urls = [...new Set(RPCS[chain])];
+  return urls.length > 1 ? fallback(urls.map((u) => http(u, { timeout: 10_000, retryCount: 1 })), { rank: false }) : http(urls[0]);
+};
 
 const mk = (id: number, name: string, url: string): Chain =>
   defineChain({ id, name, nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [url] } } });
@@ -56,9 +66,9 @@ export const explorers = {
 };
 
 export const pub = {
-  origin: createPublicClient({ chain: chains.origin, transport: http(RPC.origin) }) as PublicClient,
-  dest: createPublicClient({ chain: chains.dest, transport: http(RPC.dest) }) as PublicClient,
-  lasna: createPublicClient({ chain: chains.lasna, transport: http(RPC.lasna) }) as PublicClient,
+  origin: createPublicClient({ chain: chains.origin, transport: transportFor("origin") }) as PublicClient,
+  dest: createPublicClient({ chain: chains.dest, transport: transportFor("dest") }) as PublicClient,
+  lasna: createPublicClient({ chain: chains.lasna, transport: transportFor("lasna") }) as PublicClient,
 };
 
 // ---------------------------------------------------------------- addresses
@@ -131,8 +141,7 @@ function keyFor(role: "user" | "solver" | "deployer"): Hex {
 }
 
 export function wallet(role: "user" | "solver" | "deployer", chain: keyof typeof chains): WalletClient {
-  const rpc = { origin: RPC.origin, dest: RPC.dest, lasna: RPC.lasna }[chain];
-  return createWalletClient({ account: privateKeyToAccount(keyFor(role), { nonceManager }), chain: chains[chain], transport: http(rpc) });
+  return createWalletClient({ account: privateKeyToAccount(keyFor(role), { nonceManager }), chain: chains[chain], transport: transportFor(chain) });
 }
 
 // ---------------------------------------------------------------- order types

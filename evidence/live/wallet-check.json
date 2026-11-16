@@ -1,16 +1,20 @@
 {
-  "at": "2026-11-16T20:21:22.147Z",
+  "at": "2026-11-16T20:30:56.448Z",
   "env": "live",
-  "url": "http://localhost:5198/?debug",
+  "url": "https://meghvyas3132.github.io/snapsettle/?debug",
   "wallet": "0x72028569Be3dB46659C8CDFe2EF56361a42cd977",
   "txsSignedByWallet": [
-    "signature"
+    "signature",
+    "0xbf88dac3e83a67ed054320b473dbad0d7ce435334dea98b261e85f98240e9928"
   ],
   "settled": true,
-  "seconds": 36,
-  "orderId": "0x70c7…403f",
-  "panel": "LIVE ON TESTNET Your order, live on testnet Close +0 s Opened on Base Sepolia 0x51db…f2e4 +1.4 s Filled on Unichain Sepolia 0x1f77…6d7f ≈+1.4 s Seen and checked on Lasna 0x2b30…46fc +2.6 s Solver repaid on Base Sepolia 0x6d21…03d1 Order 0x70c7…403f: fill → solver repaid 1.2 s on the chains' own block clocks (1 s resolution); open → repaid 2.6 s. Live on testnet, not a replay.",
+  "seconds": 85,
+  "orderId": "0x4e3a…2fe3",
+  "panel": "LIVE ON TESTNET Your order, live on testnet Close +0 s Opened on Base Sepolia 0xbf88…9928 +2 s Filled on Unichain Sepolia 0x42ec…bdcd ≈+2 s Seen and checked on Lasna 0x40ba…4821 +3.6 s Solver repaid on Base Sepolia 0xd4bb…eb9f Order 0x4e3a…2fe3: fill → solver repaid 1.6 s on the chains' own block clocks (1 s resolution); open → repaid 3.6 s. Live on testnet, not a replay.",
   "pageErrors": [
-    "warning: [.WebGL-0x11c0084d400]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels"
+    "warning: [.WebGL-0x11c00851c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "warning: [.WebGL-0x11c00851c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "warning: [.WebGL-0x11c00851c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "warning: [.WebGL-0x11c00851c00]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)"
   ]
 }

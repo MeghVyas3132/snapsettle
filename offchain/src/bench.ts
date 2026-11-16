@@ -123,7 +123,10 @@ async function oneLoop(i: number, amount: bigint, hub: EventHub): Promise<LoopRo
     fillDeadline,
   };
   const sentAt = now();
-  const hash = await user.writeContract({ address: addr.escrow, abi: abi.escrow, functionName: "open", args: [order], chain: chains.origin, account: user.account! });
+  // 20% gas headroom: one open ran out of gas inside USDC's transfer when the estimate was made just before a
+  // concurrent order changed storage.
+  const gas = ((await pub.origin.estimateContractGas({ address: addr.escrow, abi: abi.escrow, functionName: "open", args: [order], account: user.account! })) * 12n) / 10n;
+  const hash = await user.writeContract({ address: addr.escrow, abi: abi.escrow, functionName: "open", args: [order], chain: chains.origin, account: user.account!, gas });
   const rcpt = await pub.origin.waitForTransactionReceipt({ hash, pollingInterval: 100 });
   const minedSeenAt = now();
   if (rcpt.status !== "success") throw new Error(`open reverted on Base Sepolia: ${hash}`);

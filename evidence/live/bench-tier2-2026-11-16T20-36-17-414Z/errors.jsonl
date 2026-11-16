@@ -1,0 +1,3 @@
+{"i":5,"error":"The contract function \"open\" reverted with the following reason: ERC20: transfer amount exceeds balance","reason":"ERC20: transfer amount exceeds balance","at":"2026-11-16T20:41:42.586Z"}
+{"i":12,"error":"The contract function \"open\" reverted with the following reason: ERC20: transfer amount exceeds balance","reason":"ERC20: transfer amount exceeds balance","at":"2026-11-16T20:47:11.827Z"}
+{"i":41,"error":"The contract function \"open\" reverted with the following reason: ERC20: transfer amount exceeds balance","reason":"ERC20: transfer amount exceeds balance","at":"2026-11-16T21:24:25.267Z"}

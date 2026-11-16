@@ -214,7 +214,7 @@ const vers = [CURRENT, ...["v3", "v2", "v1"].filter((v) => v !== CURRENT)];
 const perVer = (f: (r: Run) => number) => vers.map((v) => `${v}: ${runs.filter((r) => r.ver === v).reduce((a, r) => a + f(r), 0)}`).join(" · ");
 const backfilled = runs.reduce((a, r) => a + r.loops.filter((l) => l.settleSeenBy === "backfill").length, 0);
 L.push(
-  `| Bench errors before an order existed: all but one are reverted opens, the other a bench parsing bug. The bench kept only the first line of each error, so the revert reasons were lost (fixed). They cluster at balance top-ups, and the one open revert decoded since was \`ERC20: transfer amount exceeds balance\`, so a short wallet is likely but not proven | ${perVer((r) => r.errors)} | \`errors.jsonl\` in each run |`,
+  `| Bench errors before an order existed: opens that reverted, plus one early bench parsing bug. Until 2026-11-16 the bench kept only the first line of each error, so older reasons were lost. Every reason recorded since is \`ERC20: transfer amount exceeds balance\` (the bench wallet ran short between top-ups), except one open that ran out of gas inside USDC's transfer (gas now estimated with 20% headroom) | ${perVer((r) => r.errors)} | \`errors.jsonl\` in each run |`,
   `| Recorded orders not settled by the bench's timeout | ${perVer((r) => r.loops.filter((l) => !l.ok).length)} | \`loops.jsonl\`, \`ok: false\` |`,
   `| Orders our solver left unfilled, refunded to the user by Reactive's callback | ${refunds.length} | \`evidence/live/recovery/refunds.jsonl\` |`,
   `| Settlements the observer missed (its log scanner fell >200 blocks behind; fixed), completed from chain logs | ${backfilled} | the tier-2 run with \`loops.observed.jsonl\` |`,
