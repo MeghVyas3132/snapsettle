@@ -28,9 +28,11 @@ export DEPLOY_TAG=local RC_FUND=0 ESCROW_FUND=0 LOOP_LATENCY=${LOOP_LATENCY:-10}
 run() { forge script "script/$1" --rpc-url "$2" --private-key $DEPLOYER_KEY --broadcast >/dev/null 2>&1 || { echo "failed: $1"; exit 1; }; }
 run Deploy.s.sol:DeployDestination $DEST
 run Deploy.s.sol:DeployReactive    $LASNA
+# Test tokens before the escrow: the escrow is pinned to one token pair at deployment.
+run Local.s.sol:LocalToken         $ORIGIN
+run Local.s.sol:LocalToken         $DEST
+export ORIGIN_TOKEN=$(jq -r .token deployments/local/token-84532.json) DEST_TOKEN=$(jq -r .token deployments/local/token-1301.json)
 run Deploy.s.sol:DeployOrigin      $ORIGIN
 run Deploy.s.sol:WireReactive      $LASNA
 run Deploy.s.sol:DeployResolver    $ORIGIN
-run Local.s.sol:LocalToken         $ORIGIN
-run Local.s.sol:LocalToken         $DEST
 echo "local harness up:"; cat deployments/local/*.json | tr -d '\n'; echo

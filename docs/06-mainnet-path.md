@@ -24,7 +24,7 @@ Deployment is `scripts/deploy-live.sh` with those values in the environment.
 | Delayed | 3 | `Opened`, `Filled`, `Confirmed` (settle requested on `Confirmed`) |
 | Unfilled, refunded | 2 | `Opened`, `RefundRequested` |
 
-Plus one callback on the origin chain, paid from the escrow's callback balance, and, for delayed orders, one `confirm` transaction on the destination paid by the solver. On Lasna a reactive transaction cost about 0.0125 lREACT (measured from the contract's balance). The mainnet price in REACT, and REACT's price, are not known to us, so the dollar cost per settlement is open.
+Plus one callback on the origin chain, paid from the escrow's callback balance, and, for delayed orders, one `confirm` transaction on the destination paid by the solver. On Lasna the v3 contract spent 7.64 lREACT on about 175 orders, roughly 460 reactive transactions: about 0.017 lREACT per reactive transaction and 0.045 per order across our tier mix (an estimate from the balance before and after; Lasna bills with a delay, so short windows mislead). The contract is topped up with `pnpm topup`. The mainnet price in REACT, and REACT's price, are not known to us, so the dollar cost per settlement is open.
 
 ## Not known yet
 

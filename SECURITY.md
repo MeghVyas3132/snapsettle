@@ -29,7 +29,7 @@ The same failure cases were also run as on-chain transactions; see the dashboard
 
 - **Reorgs.** On-sight orders pay on what Reactive observed: a fill reorganised away afterwards stays paid. Delayed orders re-check the destination with `confirm`, so a reorg during the wait is caught, but not one after `confirm`. Exposure is bounded by tier size and the hourly outflow cap (`docs/05-finality-policy.md`).
 - **Confirm is an action.** Delayed orders need someone (the solver) to send `confirm` within a day of being ready; otherwise the user can be refunded.
-- **Liveness.** If the reactive contract runs out of lREACT, or the escrow runs out of callback ETH, settlement stalls silently. Both expose a public `coverDebt()`; the owner can `retry(id)` a callback that never landed (the escrow ignores duplicates).
+- **Liveness.** If the reactive contract runs out of lREACT, or the escrow runs out of callback ETH, settlement stalls silently. Each order costs about 0.045 lREACT; `pnpm topup status` shows the balance and the orders it covers (on 2026-11-16 the contract fell to 0.36 lREACT after the v3 bench before we caught it, and was refilled). Both expose a public `coverDebt()`; the owner can `retry(id)` a callback that never landed (the escrow ignores duplicates).
 - **Refund grace.** Refunds open at `fillDeadline + 60 s`. The grace must stay above the worst fill-to-observation lag; it is a deployment parameter.
 - **Owner powers.** The reactive contract's owner can only wire the escrow once and re-send callbacks. It cannot move escrowed funds, change terms, or change tiers after deployment.
 - **Single destination.** The escrow accepts orders for one destination chain and settler. More routes mean more deployments.

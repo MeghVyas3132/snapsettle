@@ -11,6 +11,7 @@
     "reorgcheck": "tsx src/reorgcheck.ts",
     "policycheck": "tsx src/policycheck.ts",
     "walletcheck": "tsx src/walletcheck.ts",
+    "topup": "tsx src/topup.ts",
     "negative": "tsx src/negative.ts",
     "typecheck": "tsc --noEmit",
     "judge": "tsx src/judge.ts",
