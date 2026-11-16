@@ -105,6 +105,8 @@ SNAP_ENV=local pnpm relay:local & SNAP_ENV=local pnpm solver & SNAP_ENV=local pn
 SNAP_ENV=live pnpm bench --tier 0 --n 50     # writes evidence/live/bench-*
 SNAP_ENV=live pnpm negative                  # refusal cases (pause other solvers first)
 SNAP_ENV=live pnpm judge                     # regenerates JUDGE.md and the CSV
+SNAP_ENV=live pnpm policycheck               # opens a hostile order (pays out 2x) and checks the solver refuses it
+SNAP_ENV=live pnpm walletcheck               # clicks "Open your own order" on the live site with a scripted wallet, waits for repayment
 ```
 
 ## Repository

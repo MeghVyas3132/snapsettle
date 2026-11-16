@@ -36,3 +36,6 @@ Plus one callback on the origin chain, paid from the escrow's callback balance, 
 
 - Bonded fast settlement as a fallback to trusting Reactive ([07-bonded-settlement.md](07-bonded-settlement.md)).
 - Monitoring of the reactive contract's lREACT/REACT balance and the escrow's callback balance; settlement stalls silently if either runs out (`coverDebt()` exists on both).
+- A token allowlist and a minimum order size in `OriginEscrow.open()`. Today any ERC-20 and any non-zero amount opens an order, and each order costs the operator reactive transactions, so spam would drain the balance; with an allowlist the spam reverts before an event exists. It also rules out fee-on-transfer and rebasing tokens.
+- The outflow cap per solver (or on on-sight orders only), so one party filling its own orders cannot use up everyone's hourly budget.
+- Solver-side term checks stay mandatory whatever the escrow does: the reference solver refuses orders outside its token pair, above its inventory, or paying out more than they repay (`offchain/src/solver.ts`, tested live by `pnpm policycheck`).

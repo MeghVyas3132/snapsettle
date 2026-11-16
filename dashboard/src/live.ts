@@ -45,7 +45,7 @@ export async function openOwnOrder() {
   deps.open("Your order, live on testnet", "live");
   const a = store.config.addresses;
   if (!eth) {
-    deps.steps(`<li data-on="true"><span class="verify__t">—</span><span>No browser wallet found on this page. Install one that supports testnets, or use <b>Run one live order</b>.</span></li>`);
+    deps.steps(`<li data-on="true"><span class="verify__t">—</span><span>No browser wallet found on this page. Install one that supports testnets (MetaMask, Rabby), or press <b>Replay a recorded loop</b> to step through a real one.</span></li>`);
     return;
   }
   try {
@@ -138,7 +138,8 @@ export async function track(id: Hex, title: string, force = false) {
     const rows: Array<[string, "origin" | "dest" | "lasna", Hex | undefined, string]> = [
       ["Opened on Base Sepolia", "origin", r?.tx.open, r?.tx.open ? "+0 s" : ""],
       ["Filled on Unichain Sepolia", "dest", r?.tx.fill, at(t.fill)],
-      ["Seen and checked on Lasna", "lasna", r?.tx.react, at(t.seen)],
+      // Lasna's and Unichain's block clocks differ by about ±1 s, so Lasna can read a moment before the fill it saw.
+      ["Seen and checked on Lasna", "lasna", r?.tx.react, t.seen !== undefined && t.fill !== undefined && t.seen < t.fill ? `≈${at(t.fill)}` : at(t.seen)],
       ["Solver repaid on Base Sepolia", "origin", r?.tx.settle, at(t.repaid)],
     ];
     deps.steps(rows.map(([name, c, h, when]) => `<li data-on="${Boolean(h)}"><span class="verify__t">${h ? when : "…"}</span><span>${name}</span>${h ? link(c, "tx", h) : `<span class="wait">waiting</span>`}</li>`).join(""));
@@ -151,10 +152,16 @@ export async function track(id: Hex, title: string, force = false) {
     return r;
   };
   const deadline = Date.now() + 120_000;
+  let settledAt = 0;
   await new Promise<void>((resolve) => {
     const iv = setInterval(() => {
       const r = render();
-      if (r?.tx.settle || r?.state === "refunded" || Date.now() > deadline || tracking !== id) {
+      // Stop once the repayment has its time, not merely its link: the time is what the visitor came to see.
+      if (r?.tx.settle && !settledAt) settledAt = Date.now();
+      // Lasna's block time is one more lookup; give it up to 10 s after the repayment shows.
+      const timed = r?.t.repaid !== undefined && r.t.fill !== undefined && (r.t.seen !== undefined || Date.now() - settledAt > 10_000);
+      const done = Boolean(r?.tx.settle && timed);
+      if (done || r?.state === "refunded" || Date.now() > deadline || tracking !== id) {
         clearInterval(iv);
         resolve();
       }
@@ -167,8 +174,10 @@ export async function track(id: Hex, title: string, force = false) {
     const f2r = Math.max(0, r.t.repaid - r.t.fill);
     deps.scene?.lcdRight.set(deps.hms(f2r), { caption: "LIVE · REPAID", live: true });
     deps.note(`Order ${short(id)}: fill → solver repaid ${crossChain(f2r)} on the chains' own block clocks (1 s resolution); open → repaid ${fmtS(r.t.repaid)}. Live on testnet, not a replay.`);
-  } else if (!r?.tx.settle) {
-    deps.note(`Order ${short(id)} has not settled within two minutes. If no solver filled it, the owner can request a refund after its deadline.`);
+  } else if (r?.tx.settle) {
+    deps.note(`Order ${short(id)}: solver repaid on Base Sepolia. Live on testnet, not a replay; the transaction links above carry the block times.`);
+  } else {
+    deps.note(`Order ${short(id)} has not settled within two minutes, so our solver is probably offline. Your USDC stays in the escrow: about 11 minutes after opening, call requestRefund(${id}) on the escrow from the same wallet and Reactive sends it back.`);
   }
   store.setFast(false);
   setTimeout(() => {

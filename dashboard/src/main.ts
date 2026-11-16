@@ -466,7 +466,7 @@ async function boot() {
   if (gl) {
     scene = new ClockScene($("stage"));
     scene.onFrame = () => layoutNotes(scene!);
-    if (new URLSearchParams(location.search).has("debug")) (window as unknown as { __scene: ClockScene }).__scene = scene;
+    if (new URLSearchParams(location.search).has("debug")) Object.assign(window as unknown as object, { __scene: scene, __store: store });
     renderNotes();
   } else {
     document.documentElement.classList.add("no-gl");

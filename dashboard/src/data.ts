@@ -261,6 +261,18 @@ class Store {
     return out;
   }
 
+  /** Recompute a row's times as soon as any of its timestamps arrives, so a reader never sees links without times. */
+  private retime(r: Row & { abs?: Record<string, number> }) {
+    const abs = r.abs;
+    if (abs?.open === undefined) return;
+    r.t = {
+      open: 0,
+      fill: abs.fill !== undefined ? abs.fill - abs.open : undefined,
+      seen: abs.seen !== undefined ? abs.seen - abs.open : undefined,
+      repaid: abs.repaid !== undefined ? abs.repaid - abs.open : undefined,
+    };
+  }
+
   private rowFor(id: Hex): Row & { abs?: Record<string, number> } {
     const k = id.toLowerCase();
     let r = this.chainRows.get(k);
@@ -297,11 +309,13 @@ class Store {
           r.tx.open = log.transactionHash;
           r.sortKey = at * 1000;
           r.abs.open = at;
+          this.retime(r);
         } else if (log.eventName === "Settled") {
           if (!r.tx.settle && !this.first) settled.push(id);
+          r.abs.repaid = at;
+          this.retime(r);
           r.tx.settle = log.transactionHash;
           r.state = "repaid";
-          r.abs.repaid = at;
         } else if (log.eventName === "Refunded") {
           r.state = "refunded";
         }
@@ -311,6 +325,7 @@ class Store {
         r.tx.fill = log.transactionHash;
         if (r.state === "open") r.state = "filled";
         (r.abs ??= {}).fill = await this.ts("dest", log.blockNumber);
+        this.retime(r);
       }
       for (const log of l) {
         if (log.eventName !== "FillAccepted") continue;
@@ -318,16 +333,7 @@ class Store {
         r.tx.react = log.transactionHash;
         if (r.state !== "repaid" && Number(log.args.settleDelay) > 0) r.state = "waiting";
         (r.abs ??= {}).seen = await this.ts("lasna", log.blockNumber);
-      }
-      for (const r of this.chainRows.values() as Iterable<Row & { abs?: Record<string, number> }>) {
-        const abs = r.abs;
-        if (abs?.open === undefined) continue;
-        r.t = {
-          open: 0,
-          fill: abs.fill !== undefined ? abs.fill - abs.open : undefined,
-          seen: abs.seen !== undefined ? abs.seen - abs.open : undefined,
-          repaid: abs.repaid !== undefined ? abs.repaid - abs.open : undefined,
-        };
+        this.retime(r);
       }
     } catch (e) {
       console.warn("poll failed:", (e as Error).message?.split("\n")[0]);

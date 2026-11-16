@@ -1,0 +1,11 @@
+{
+  "at": "2026-11-16T12:15:04.215Z",
+  "env": "live",
+  "orderId": "0x4ae39f277d35e2451555b9b6848348185866a5cbe3140cb3669549d26e9873ca",
+  "openTx": "0x52648d08562194c4966a73eac6d00518f7deca897ea6085ac0d05ad74d35d5cb",
+  "outputAmount": "500000",
+  "inputAmount": "250000",
+  "filledOnUnichain": false,
+  "solverRefusal": "pays out more than it repays",
+  "pass": true
+}
