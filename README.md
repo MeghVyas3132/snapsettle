@@ -149,7 +149,7 @@ SNAP_ENV=live pnpm walletcheck               # clicks "Open your own order" on t
 
 ## Limits
 
-Testnet only and not audited. Every actor in the evidence is ours: the user wallet, the solver and the demo service. The on-sight tier still trusts what Reactive observed; its protection is the size cap and the hourly outflow cap. Reactive's mainnet support for this architecture with Base and Unichain is not confirmed yet ([docs/06-mainnet-path.md](docs/06-mainnet-path.md)). More in [SECURITY.md](SECURITY.md).
+Testnet only and not audited. Every actor in the evidence is ours: the user wallet, the solver and the demo service. The on-sight tier still trusts what Reactive observed; its protection is the size cap and the hourly outflow cap. Reactive mainnet supports Base and Unichain as origin and destination, and runs the same system contracts as Lasna (checked on-chain, [docs/06-mainnet-path.md](docs/06-mainnet-path.md)); what mainnet would cost in REACT is not measured yet. More in [SECURITY.md](SECURITY.md).
 
 ## License
 

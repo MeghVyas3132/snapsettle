@@ -26,9 +26,19 @@ Deployment is `scripts/deploy-live.sh` with those values in the environment.
 
 Plus one callback on the origin chain, paid from the escrow's callback balance, and, for delayed orders, one `confirm` transaction on the destination paid by the solver. On Lasna the v3 contract spent 7.64 lREACT on about 175 orders, roughly 460 reactive transactions: about 0.017 lREACT per reactive transaction and 0.045 per order across our tier mix (an estimate from the balance before and after; Lasna bills with a delay, so short windows mislead). The contract is topped up with `pnpm topup`. The mainnet price in REACT, and REACT's price, are not known to us, so the dollar cost per settlement is open.
 
+## Mainnet support, checked
+
+Reactive mainnet (chain 1597) supports this exact route, checked on 2026-11-17:
+
+- Reactive's chain list ([origins and destinations](https://dev.reactive.network/origins-and-destinations)) has Base (8453) and Unichain (130) as mainnet origin and destination, with callback proxies `0xCc780DdE33f56f55dE778D42c930959374a4a068` (Base) and `0x754120EC7a6eF81E4c5c835AA603C63Da64693E6` (Unichain).
+- Both proxies are deployed: 218 bytes of code each, the same size as the Base Sepolia proxy our escrow uses (`cast codesize <proxy> --rpc-url https://mainnet.base.org`, and `https://mainnet.unichain.org`).
+- Reactive mainnet runs the same system contracts as Lasna, where all our evidence comes from: the code at `0x…fffFfF` and at `0x8888…8888` hashes identically on both (`cast code <addr> --rpc-url https://mainnet-rpc.rnk.dev/ | cast keccak`, and the same on Lasna).
+
+So the contracts deploy to mainnet as they are, with mainnet addresses (callback proxies, USDC on both chains) and mainnet parameters (tiers, cap, minimum).
+
 ## Not known yet
 
-- Whether Reactive's mainnet supports this architecture (Omni, `requestCallbackV_1_0`) with Base and Unichain as origin and destination. Reactive's blog announced its mainnet migration as complete (Oct 2026); support for these two chains in that setting is to be confirmed with the Reactive team.
+- The cost in REACT per settlement on mainnet, and REACT's price.
 - A solver market: on testnet the only solver is ours.
 - An audit.
 
