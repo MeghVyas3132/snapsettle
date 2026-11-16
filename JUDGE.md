@@ -61,7 +61,7 @@ Each clock has a known bias, stated under the table. No single one is exact; rea
 |---|---|---|
 | Bench errors before an order existed: all but one are reverted opens, the other a bench parsing bug. The bench kept only the first line of each error, so the revert reasons were lost (fixed). They cluster at balance top-ups, and the one open revert decoded since was `ERC20: transfer amount exceeds balance`, so a short wallet is likely but not proven | v3: 0 · v2: 1 · v1: 18 | `errors.jsonl` in each run |
 | Recorded orders not settled by the bench's timeout | v3: 0 · v2: 3 · v1: 3 | `loops.jsonl`, `ok: false` |
-| Orders our solver left unfilled, refunded to the user by Reactive's callback | 13 | `evidence/live/recovery/refunds.jsonl` |
+| Orders our solver left unfilled, refunded to the user by Reactive's callback | 14 | `evidence/live/recovery/refunds.jsonl` |
 | Settlements the observer missed (its log scanner fell >200 blocks behind; fixed), completed from chain logs | 6 | the tier-2 run with `loops.observed.jsonl` |
 | Solver process crashed on an RPC timeout (fixed: scan errors no longer stop it) | 1 | `docs/DECISIONS.md` |
 | Solver stalled after its log cursor fell >200 Base blocks behind (bug introduced by the speed-up, fixed); 3 tier-0 orders went unfilled and were refunded | 1 | `docs/DECISIONS.md` |
@@ -91,7 +91,7 @@ v2: as v3 but `open()` accepted any token and amount (addresses in `contracts/de
 
 ## 7. The comparison, reproducible
 
-Across repays relayers in bundles, proposed every ~1.5 hours at minimum ([Across docs](https://docs.across.to/introduction/refunds)), each followed by a challenge period. Read the challenge period from the live HubPool on Ethereum mainnet:
+Across repays relayers in bundles, proposed about every 1.5 hours ([Across docs](https://docs.across.to/introduction/refunds)), each followed by a challenge period. `HubPool.sol` starts it at 7200 s; the owner lowered it to 5400 s (2023-09-19), 3600 s (2024-04-21) and 1800 s (2025-11-03, [tx](https://etherscan.io/tx/0x2c513bb36f181c2fae8d244089f08dd3e0700094fb12c82b25c795b033a0a6a7)). Read the challenge period from the live HubPool on Ethereum mainnet:
 
 ```
 cast call 0xc186fA914353c44b2E33eBE05f21846F1048bEda "liveness()(uint32)" --rpc-url https://ethereum-rpc.publicnode.com

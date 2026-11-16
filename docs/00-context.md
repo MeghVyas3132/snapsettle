@@ -11,7 +11,7 @@ Snapsettle answers with working code: Reactive observes the destination fill dir
 
 ## The pain (sourced)
 
-- Across repays relayers in bundles proposed every ~1.5 h at minimum (https://docs.across.to/introduction/refunds), each followed by a challenge period; disputes go to UMA's Optimistic Oracle. The live HubPool's challenge period is **30 minutes**: `cast call 0xc186fA914353c44b2E33eBE05f21846F1048bEda "liveness()(uint32)"` returns 1800 (read 16 Nov 2026). `HubPool.sol`'s 7200 s default and older docs' "2 hours" are stale. A relayer therefore waits roughly 30 min to 2 h.
+- Across repays relayers in bundles proposed about every 1.5 h (https://docs.across.to/introduction/refunds), each followed by a challenge period; disputes go to UMA's Optimistic Oracle. The live HubPool's challenge period is **30 minutes**: `cast call 0xc186fA914353c44b2E33eBE05f21846F1048bEda "liveness()(uint32)"` returns 1800 (read 16 Nov 2026). `HubPool.sol`'s 7200 s default and older docs' "2 hours" are stale. A relayer therefore waits roughly 30 min to 2 h.
 - The relayer fee must cover the opportunity cost of capital over that window. https://across.to/blog/The-Intents-bridge-How-Across-uses-optimistic-verification-to-lower-costs
 - ERC-7683 (Draft) is now resolver-centric: protocols keep their own settlement; payments carry `estimatedDelaySeconds` ("The payment SHOULD be delayed by `estimatedDelaySeconds` with high confidence"). https://eips.ethereum.org/EIPS/eip-7683
 

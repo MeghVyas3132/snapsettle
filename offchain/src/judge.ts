@@ -174,7 +174,7 @@ L.push(
   "",
   "## 7. The comparison, reproducible",
   "",
-  "Across repays relayers in bundles, proposed every ~1.5 hours at minimum ([Across docs](https://docs.across.to/introduction/refunds)), each followed by a challenge period. Read the challenge period from the live HubPool on Ethereum mainnet:",
+  "Across repays relayers in bundles, proposed about every 1.5 hours ([Across docs](https://docs.across.to/introduction/refunds)), each followed by a challenge period. `HubPool.sol` starts it at 7200 s; the owner lowered it to 5400 s (2023-09-19), 3600 s (2024-04-21) and 1800 s (2025-11-03, [tx](https://etherscan.io/tx/0x2c513bb36f181c2fae8d244089f08dd3e0700094fb12c82b25c795b033a0a6a7)). Read the challenge period from the live HubPool on Ethereum mainnet:",
   "",
   "```",
   "cast call 0xc186fA914353c44b2E33eBE05f21846F1048bEda \"liveness()(uint32)\" --rpc-url https://ethereum-rpc.publicnode.com",

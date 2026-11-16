@@ -21,14 +21,14 @@ Built for the Reactive Omni Buildathon, track **Every Second Counts**.
 
 In an intent bridge the solver pays the user on the destination chain from its own inventory and is repaid later from the user's escrow on the origin chain. The origin chain cannot see the destination fill, so every protocol needs a way to learn that the fill happened, and that way sets how long the solver's capital is tied up.
 
-Across, for example, repays relayers in bundles proposed every ~1.5 hours at minimum, each followed by a challenge period ([Across docs](https://docs.across.to/introduction/refunds)). The challenge period on the live HubPool is 30 minutes; check it in one line:
+Across, for example, repays relayers in bundles proposed about every 1.5 hours, each followed by a challenge period ([Across docs](https://docs.across.to/introduction/refunds)). The challenge period on the live HubPool is 30 minutes; check it in one line:
 
 ```bash
 cast call 0xc186fA914353c44b2E33eBE05f21846F1048bEda "liveness()(uint32)" --rpc-url https://ethereum-rpc.publicnode.com
 # 1800
 ```
 
-(`HubPool.sol` declares a 7200 s default and older Across docs still say 2 hours; both predate a `setLiveness` call.) So an Across relayer is repaid roughly 30 minutes to 2 hours after its fill.
+(`HubPool.sol` declares a 7200 s default and older Across docs still say 2 hours. The owner has lowered it on-chain three times: 5400 s in September 2023, 3600 s in April 2024, and 1800 s on 3 November 2025, [tx 0x2c51…a6a7](https://etherscan.io/tx/0x2c513bb36f181c2fae8d244089f08dd3e0700094fb12c82b25c795b033a0a6a7).) So an Across relayer is repaid roughly 30 minutes to 2 hours after its fill.
 
 That window is not waste: it is the time in which a fraudulent bundle can be disputed. Any faster scheme replaces it with some other source of trust. Snapsettle's is stated below.
 
@@ -55,7 +55,7 @@ solver repaid (capped per hour)
 
 ## The trade, stated plainly
 
-Snapsettle replaces Across's dispute window with trust in Reactive's validators reading two chains' logs correctly (CometBFT, safe while fewer than a third misbehave; today its sequencer is not decentralised). The finality tiers are where that trade is made explicit: per order and by value, instead of once for every order. Reactive's post [*Intents, Solvers, and Borrowed Certainty*](https://blog.reactive.network/intents-solvers-and-borrowed-certainty/) calls origin finality a deliberate trade and closes by asking: "should that be a per-protocol choice, or the next thing somebody tries to standardize?" Snapsettle is one per-order answer, published through ERC-7683's own fields.
+Snapsettle replaces Across's dispute window with trust in Reactive's validators reading two chains' logs correctly (Reactive runs CometBFT consensus, which is safe while fewer than a third of validators misbehave). The finality tiers are where that trade is made explicit: per order and by value, instead of once for every order. Reactive's post [*Intents, Solvers, and Borrowed Certainty*](https://blog.reactive.network/intents-solvers-and-borrowed-certainty/) calls origin finality a deliberate trade and closes by asking: "should that be a per-protocol choice, or the next thing somebody tries to standardize?" Snapsettle is one per-order answer, published through ERC-7683's own fields.
 
 ## How much faster, honestly
 
