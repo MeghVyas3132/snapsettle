@@ -30,12 +30,15 @@ type Deps = {
 
 let deps: Deps;
 let tracking: Hex | null = null;
+/** True while the visitor is opening their own order (wallet prompts can take a while): other people's orders
+ *  must not take over the panel in the meantime. */
+let ownFlow = false;
 
 export function initLive(d: Deps) {
   deps = d;
   // Anyone's order (the demo heartbeat, another judge) is followed live if nothing else is on the clock.
   store.onOpened((id) => {
-    if (!tracking) void track(id, "An order just opened on Base Sepolia");
+    if (!tracking && !ownFlow) void track(id, "An order just opened on Base Sepolia");
   });
 }
 
@@ -58,6 +61,15 @@ async function post<T>(path: string, body: unknown): Promise<T & { error?: strin
  * order, so whoever submits it cannot change a single term.
  */
 export async function openOwnOrder() {
+  ownFlow = true;
+  try {
+    await ownOrderFlow();
+  } finally {
+    ownFlow = false;
+  }
+}
+
+async function ownOrderFlow() {
   const eth = (window as unknown as { ethereum?: EIP1193Provider }).ethereum;
   deps.open("Your order, live on testnet", "live");
   const a = store.config.addresses;
