@@ -291,11 +291,21 @@ class Store {
     const settled: Hex[] = [];
     const opened: Hex[] = [];
     try {
-      const [o, d, l] = await Promise.all([
+      // Each chain is polled on its own: one public RPC failing must not hide the other two chains' events.
+      // A chain that fails keeps its cursor, so its events arrive on the next poll that succeeds.
+      const got = await Promise.allSettled([
         this.pollChain("origin", a.escrow, ORIGIN_EVENTS, 3000n),
         this.pollChain("dest", a.destinationSettler, DEST_EVENTS, 900n),
         this.pollChain("lasna", a.reactive, LASNA_EVENTS, 900n),
       ]);
+      const names: ChainKey[] = ["origin", "dest", "lasna"];
+      got.forEach((g, i) => {
+        if (g.status === "rejected") {
+          console.warn(`poll ${names[i]} failed:`, (g.reason as Error)?.message?.split("\n")[0]);
+          if (this.heads[names[i]]) this.heads[names[i]]!.ok = false;
+        }
+      });
+      const [o, d, l] = got.map((g) => (g.status === "fulfilled" ? g.value : []));
       for (const log of o) {
         const id = log.args.orderId as Hex;
         const r = this.rowFor(id);
@@ -332,7 +342,8 @@ class Store {
         const r = this.rowFor(log.args.orderId as Hex);
         r.tx.react = log.transactionHash;
         if (r.state !== "repaid" && Number(log.args.settleDelay) > 0) r.state = "waiting";
-        (r.abs ??= {}).seen = await this.ts("lasna", log.blockNumber);
+        const seenAt = await this.ts("lasna", log.blockNumber).catch(() => undefined);
+        if (seenAt !== undefined) (r.abs ??= {}).seen = seenAt;
         this.retime(r);
       }
     } catch (e) {
