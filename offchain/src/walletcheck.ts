@@ -29,6 +29,13 @@ await page.exposeFunction("__walletRequest", async (method: string, params: unkn
     case "wallet_switchEthereumChain":
     case "wallet_addEthereumChain":
       return null;
+    case "eth_signTypedData_v4": {
+      // What MetaMask does for the one-signature order: sign EIP-712 data with the account's key.
+      const td = JSON.parse(String(params[1])) as { domain: Record<string, unknown>; types: Record<string, unknown>; primaryType: string; message: Record<string, unknown> };
+      const { EIP712Domain: _drop, ...types } = td.types as Record<string, unknown>;
+      sent.push("signature");
+      return w.signTypedData({ account: w.account!, domain: td.domain, types, primaryType: td.primaryType, message: td.message } as never);
+    }
     case "eth_sendTransaction": {
       const tx = params[0] as { to: Hex; data?: Hex; value?: Hex; gas?: Hex };
       const hash = await w.sendTransaction({ account: w.account!, chain: chains.origin, to: tx.to, data: tx.data, value: tx.value ? BigInt(tx.value) : undefined });
@@ -61,6 +68,9 @@ while (Date.now() - t0 < 180_000) {
   if (/fill → solver repaid .* on the chains' own block clocks/.test(panel) || /not settled within two minutes|stopped|No browser wallet/.test(panel)) { settled = /fill → solver repaid/.test(panel); break; }
 }
 const orderId = panel.match(/Order (0x[0-9a-f…]+)/)?.[1] ?? null;
+// With ?debug the page exposes its data store: record its state, so a failure says where the page got stuck.
+const diag = url.includes("debug") ? await page.evaluate(() => { const s = (window as unknown as { __store?: { polling: boolean; heads: Record<string, { block: bigint; ok: boolean }>; chainRows: Map<string, { tx: object }>; fuel: unknown } }).__store; return s ? { polling: s.polling, heads: Object.fromEntries(Object.entries(s.heads).map(([k, v]) => [k, `${v.block}/${v.ok}`])), rows: s.chainRows.size } : null; }) : null;
+if (diag) console.log("page store:", JSON.stringify(diag));
 const out = { at: new Date().toISOString(), env: ENV, url, wallet: me, txsSignedByWallet: sent, settled, seconds: Math.round((Date.now() - t0) / 1000), orderId, panel: panel.slice(0, 1200), pageErrors: errors };
 writeFileSync(join(ROOT, "evidence", ENV, "wallet-check.json"), JSON.stringify(out, null, 2));
 console.log(`${settled ? "PASS" : "FAIL"} in ${out.seconds}s; txs ${sent.join(", ")}; page errors ${errors.length}`);

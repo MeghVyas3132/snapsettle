@@ -14,8 +14,9 @@ function solverFillMs(orderId: Hex): number | undefined {
   if (!existsSync(f)) return undefined;
   for (const l of readFileSync(f, "utf8").trim().split("\n").reverse()) {
     try {
-      const r = JSON.parse(l) as { orderId: string; minedSeenAtMs?: number; status?: string };
-      if (r.orderId.toLowerCase() === orderId.toLowerCase() && r.status === "success") return r.minedSeenAtMs;
+      const r = JSON.parse(l) as { orderId: string; minedSeenAtMs?: number; status?: string; fillTx?: string };
+      // Only the fill line: delayed orders also log a later `confirm` line for the same order, without a fill time.
+      if (r.orderId.toLowerCase() === orderId.toLowerCase() && r.status === "success" && r.fillTx) return r.minedSeenAtMs;
     } catch {
       /* skip partial lines */
     }
@@ -197,7 +198,7 @@ async function main() {
   hub.stop();
 
   const summary = summarize(rows, SEGMENTS);
-  writeJson(`${dir}/summary.json`, { env: ENV, tier: TIER, tierDelay: tierPolicy[TIER]?.delay, tierPolicy, contracts: { escrow: addr.escrow, reactive: addr.reactive, destinationSettler: addr.destinationSettler }, amount: amount.toString(), n: rows.length, ok: rows.filter((r) => r.ok).length, summary });
+  writeJson(`${dir}/summary.json`, { env: ENV, tier: TIER, tierDelay: tierPolicy[TIER]?.delay, tierPolicy, contracts: { escrow: addr.escrow, reactive: addr.reactive, destinationSettler: addr.destinationSettler }, amount: amount.toString(), params: { requested: N, concurrency: CONC, gapMs: GAP }, n: rows.length, ok: rows.filter((r) => r.ok).length, summary });
   writeFileSync(`${dir}/summary.md`, renderSummaryMd(ENV, TIER, amount, rows, summary, (h) => txLink("origin", h)));
   console.log(`done: ${rows.filter((r) => r.ok).length}/${rows.length} settled; summary in ${dir}/summary.md`);
   process.exit(0);

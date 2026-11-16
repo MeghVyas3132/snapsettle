@@ -1,0 +1,4 @@
+[
+  { "build": "http-poll", "from": "2026-11-15T00:00:00Z", "note": "Polls Base over HTTP for Opened logs (head refreshed every 1 s); viem fetches the nonce before each send." },
+  { "build": "ws-push", "from": "2026-11-16T18:30:00Z", "note": "Opened logs pushed over a WebSocket subscription (HTTP poll kept as fallback); nonce kept locally. offchain/src/solver.ts" }
+]

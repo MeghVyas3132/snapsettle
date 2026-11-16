@@ -12,6 +12,7 @@ const user = wallet("user", "origin");
 const solver = wallet("solver", "dest");
 const userAddr = user.account!.address;
 const solverAddr = solver.account!.address;
+const solverOrigin = wallet("solver", "origin"); // plays the relayer in the tampered gasless case
 const dir = evidenceDir(`negative-${new Date().toISOString().replace(/[:.]/g, "-")}`);
 const file = `${dir}/cases.jsonl`;
 const results: Array<{ name: string; pass: boolean; detail: string; tx: Record<string, string | undefined> }> = [];
@@ -126,6 +127,37 @@ async function spamRefused(smallAmt: bigint) {
     { otherTokenOpen: other.tx, dustOpen: dust.tx });
 }
 
+/** v4: a relayer holding a user's signed gasless order cannot change its terms. The user signs for one order; the
+ *  "relayer" submits openFor with the output halved. It must revert on-chain (mined, forced gas) and move nothing. */
+async function gaslessTampered(smallAmt: bigint) {
+  const order: OrderData = {
+    inputToken: addr.tokenOrigin, inputAmount: smallAmt, outputToken: addr.tokenDest, outputAmount: (smallAmt * 999n) / 1000n,
+    recipient: userAddr, destinationChainId: BigInt(chains.dest.id), destinationSettler: addr.destinationSettler,
+    fillDeadline: Math.floor(Date.now() / 1000) + 600,
+  };
+  const tokenAbi = [{ type: "function", name: "name", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] }, { type: "function", name: "version", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] }] as const;
+  const [nonce, name, version, before] = await Promise.all([
+    pub.origin.readContract({ address: addr.escrow, abi: abi.escrow, functionName: "gaslessNonce", args: [order] }) as Promise<Hex>,
+    pub.origin.readContract({ address: addr.tokenOrigin, abi: tokenAbi, functionName: "name" }),
+    pub.origin.readContract({ address: addr.tokenOrigin, abi: tokenAbi, functionName: "version" }),
+    pub.origin.readContract({ address: addr.tokenOrigin, abi: abi.erc20, functionName: "balanceOf", args: [userAddr] }) as Promise<bigint>,
+  ]);
+  const validBefore = BigInt(Math.floor(Date.now() / 1000) + 600);
+  const signature = await user.signTypedData({
+    account: user.account!,
+    domain: { name, version, chainId: chains.origin.id, verifyingContract: addr.tokenOrigin },
+    types: { ReceiveWithAuthorization: [{ name: "from", type: "address" }, { name: "to", type: "address" }, { name: "value", type: "uint256" }, { name: "validAfter", type: "uint256" }, { name: "validBefore", type: "uint256" }, { name: "nonce", type: "bytes32" }] },
+    primaryType: "ReceiveWithAuthorization",
+    message: { from: userAddr, to: addr.escrow, value: smallAmt, validAfter: 0n, validBefore, nonce },
+  });
+  const tampered = { ...order, outputAmount: order.outputAmount / 2n };
+  const tx = await solverOrigin.writeContract({ address: addr.escrow, abi: abi.escrow, functionName: "openFor", args: [tampered, userAddr, 0n, validBefore, signature], chain: chains.origin, account: solverOrigin.account!, gas: 300_000n });
+  const r = await pub.origin.waitForTransactionReceipt({ hash: tx });
+  const after = (await pub.origin.readContract({ address: addr.tokenOrigin, abi: abi.erc20, functionName: "balanceOf", args: [userAddr] })) as bigint;
+  record("a relayer cannot change a signed gasless order", r.status === "reverted" && after === before,
+    `openFor with the output halved: ${r.status}; user's USDC ${after === before ? "unchanged" : "MOVED"}`, { tamperedOpenFor: tx });
+}
+
 async function refundUnfilled(hub: EventHub, smallAmt: bigint) {
   const g = await grace();
   const o = await open(smallAmt, 15);
@@ -174,6 +206,7 @@ async function main() {
   const t0 = now();
   // Sequential first: these two transactions come from the same wallet as the cases below.
   if (all || which === "spam") await spamRefused(small);
+  if (all || which === "gasless") await gaslessTampered(small);
   await Promise.all([
     all || which === "wrong-terms" ? wrongTerms(hub, small) : null,
     all || which === "late-fill" ? lateFill(small) : null,

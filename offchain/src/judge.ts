@@ -10,23 +10,31 @@ type Stat = { n: number; p50: number; p95: number };
 type Summary = { tier: number; tierDelay?: number; amount: string; n: number; ok: number; contracts?: { escrow?: string }; note?: string; summary: Record<string, Stat> };
 type Loop = { i: number; orderId: string; ok: boolean; tx: Record<string, string | undefined>; seg: Record<string, number | null>; settleSeenBy?: string };
 type Case = { name: string; pass: boolean; detail: string; tx: Record<string, string | undefined>; at?: string };
-type Run = { dir: string; s: Summary; loops: Loop[]; errors: number; current: boolean; ver: string };
+type Run = { dir: string; s: Summary; loops: Loop[]; errors: number; current: boolean; ver: string; build: string | null };
 
 const evDir = join(ROOT, "evidence", ENV);
 const current = (addr.escrow ?? "").toLowerCase();
 const readJsonl = <T>(f: string): T[] => (existsSync(f) ? readFileSync(f, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as T) : []);
 const deployedAtFile = join(ROOT, "contracts/deployments", ENV, "deployed-at.json");
-const deployedAt = existsSync(deployedAtFile) ? (JSON.parse(readFileSync(deployedAtFile, "utf8")) as { current?: string; v2?: string; v3?: string }) : {};
+const deployedAt = existsSync(deployedAtFile) ? (JSON.parse(readFileSync(deployedAtFile, "utf8")) as { current?: string; v2?: string; v3?: string; v4?: string }) : {};
 const v2At = Date.parse(deployedAt.v2 ?? "");
 const v3At = Date.parse(deployedAt.v3 ?? "");
+const v4At = Date.parse(deployedAt.v4 ?? "");
 const CURRENT = deployedAt.current ?? "current";
 // Which deployment a run used, from its escrow address; refusal runs by when they ran.
 const escrowOf = (dir: string) => { const f = join(ROOT, "contracts/deployments", dir, "3-origin.json"); return existsSync(f) ? ((JSON.parse(readFileSync(f, "utf8")) as { originEscrow?: string }).originEscrow ?? "").toLowerCase() : ""; };
-const knownEscrows: Record<string, string> = { [escrowOf(`${ENV}-v1`)]: "v1", [escrowOf(`${ENV}-v2`)]: "v2" };
+const knownEscrows: Record<string, string> = { [escrowOf(`${ENV}-v1`)]: "v1", [escrowOf(`${ENV}-v2`)]: "v2", [escrowOf(`${ENV}-v3`)]: "v3" };
 const verOfEscrow = (e?: string) => (e?.toLowerCase() === current ? CURRENT : knownEscrows[e?.toLowerCase() ?? ""] ?? "earlier");
-const verOfTime = (t: number) => (t < v2At ? "v1" : t < v3At ? "v2" : CURRENT);
+const verOfTime = (t: number) => (t < v2At ? "v1" : t < v3At ? "v2" : t < v4At ? "v3" : CURRENT);
 const dirTime = (d: string) => Date.parse(d.replace(/^[a-z0-9-]*?-(\d{4}-\d\d-\d\dT)(\d\d)-(\d\d)-(\d\d)-(\d{3})Z$/, "$1$2:$3:$4.$5Z"));
 
+// Solver builds by start time (evidence/<env>/solver/builds.json): the whole loop includes our solver's reaction,
+// so each run is tagged with the build that was live when it started.
+const buildsFile = join(evDir, "solver", "builds.json");
+const builds = (existsSync(buildsFile) ? (JSON.parse(readFileSync(buildsFile, "utf8")) as Array<{ build: string; from: string; note: string }>) : [])
+  .map((b) => ({ ...b, t: Date.parse(b.from) })).sort((a, b) => a.t - b.t);
+const buildOf = (d: string) => builds.filter((b) => b.t <= dirTime(d)).pop()?.build ?? null;
+const latestBuild = builds.at(-1)?.build ?? null;
 const runs: Run[] = [];
 const cases: Array<Case & { run: string; current: boolean; ver: string }> = [];
 if (existsSync(evDir)) {
@@ -34,7 +42,7 @@ if (existsSync(evDir)) {
     const sum = join(evDir, d, "summary.json");
     if (d.startsWith("bench-") && existsSync(sum)) {
       const s = JSON.parse(readFileSync(sum, "utf8")) as Summary;
-      runs.push({ dir: d, s, loops: readJsonl<Loop>(join(evDir, d, "loops.jsonl")), errors: readJsonl(join(evDir, d, "errors.jsonl")).length, current: s.contracts?.escrow?.toLowerCase() === current, ver: verOfEscrow(s.contracts?.escrow) });
+      runs.push({ dir: d, s, loops: readJsonl<Loop>(join(evDir, d, "loops.jsonl")), errors: readJsonl(join(evDir, d, "errors.jsonl")).length, current: s.contracts?.escrow?.toLowerCase() === current, ver: verOfEscrow(s.contracts?.escrow), build: buildOf(d) });
     }
     if (d.startsWith("negative-")) {
       const ver = verOfTime(dirTime(d));
@@ -57,7 +65,22 @@ const pct = (v: number[], p: number) => (v.length ? [...v].sort((a, b) => a - b)
 const chainOfCaseTx = (k: string): keyof typeof explorers => (/Rejected|Accepted/.test(k) ? "lasna" : /fill|confirm/i.test(k) ? "dest" : "origin");
 const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : undefined);
 
+// Correction: until 2026-11-16 the bench read the solver's log newest-first and, for delayed orders, hit the later
+// `confirm` line (no fill time), then fell back to its own slower sighting of the fill. Open → fill is recomputed
+// here from the solver's fill receipt; loops.jsonl stays as recorded.
+const fillReceipt = new Map(readJsonl<{ orderId: string; fillTx?: string; minedSeenAtMs?: number }>(join(evDir, "solver", "fills.jsonl")).filter((r) => r.fillTx && r.minedSeenAtMs).map((r) => [r.orderId.toLowerCase(), r.minedSeenAtMs!]));
+let correctedLoops = 0;
+for (const r of runs) for (const l of r.loops) {
+  const opened = (l as unknown as { seenAtMs?: { open?: number } }).seenAtMs?.open;
+  const filled = fillReceipt.get(l.orderId.toLowerCase());
+  if (!l.ok || opened === undefined || filled === undefined) continue;
+  const fixed = filled - opened;
+  if (num(l.seg.openToFill_ms) === undefined || Math.abs(fixed - l.seg.openToFill_ms!) > 500) correctedLoops++;
+  (l.seg as Record<string, number | null>).openToFill_ms = fixed;
+}
 const cur = runs.filter((r) => r.current);
+/** A tier's current figures: its runs on the current contracts, from the current solver build when there are any. */
+const curFor = (t: number) => { const rs = cur.filter((r) => r.s.tier === t); const latest = rs.filter((r) => r.build === latestBuild); return latest.length ? latest : rs; };
 const prev = runs.filter((r) => !r.current);
 const tiers = [...new Set(runs.map((r) => r.s.tier))].sort();
 
@@ -79,7 +102,7 @@ const L: string[] = [
   `| DestinationSettler | Unichain Sepolia (1301) | ${link("dest", "address", addr.destinationSettler)} |`,
   `| SnapsettleReactive | Reactive Lasna (5318007) | ${link("lasna", "address", addr.reactive)} |`,
   "",
-  "v3 (live since 2026-11-16 13:12 UTC) accepts one token pair (Circle test USDC, Base Sepolia → Unichain Sepolia) and orders of at least 0.1 USDC, so spam in other tokens or dust reverts before an event exists. v2 (2026-11-15 23:36 UTC) added the `confirm` re-check of delayed fills on Unichain, removed the cron, and capped outflow per hour. Earlier contracts and their runs are in section 6.",
+  "v4 (live since 2026-11-16 20:02 UTC) adds gasless opening: the user signs one EIP-3009 authorization whose nonce is derived from the exact order, and anyone can submit `openFor` and pay the gas without being able to change a term. The DestinationSettler is the same contract as in v3. v3 (2026-11-16 13:12 UTC) fixed the token pair and a 0.1 USDC minimum, so spam reverts before an event exists; v2 (2026-11-15 23:36 UTC) added the `confirm` re-check of delayed fills, removed the cron, and capped outflow per hour. Earlier contracts and their runs are in section 6.",
   "",
   "## 2. Full loops, joined",
   "",
@@ -90,7 +113,7 @@ const L: string[] = [
 ];
 const csv = ["tier,run,order_id,open_tx,fill_tx,confirm_tx,react_tx,settle_request_tx,settle_tx,settled,whole_loop_ms_base_blocks,fill_to_repaid_s_block_ts"];
 for (const t of tiers) {
-  const loops = cur.filter((r) => r.s.tier === t).flatMap((r) => r.loops.map((l) => ({ l, run: r.dir })));
+  const loops = curFor(t).flatMap((r) => r.loops.map((l) => ({ l, run: r.dir })));
   for (const { l, run } of loops) {
     const c = confirms.get(l.orderId.toLowerCase()) ?? "";
     csv.push([t, run, l.orderId, l.tx.open ?? "", l.tx.fill ?? "", c, l.tx.react ?? "", l.tx.settleRequest ?? "", l.tx.settle ?? "", l.ok, num(l.seg.fullBase_ms) ?? "", num(l.seg.fillToSettle_s) ?? ""].join(","));
@@ -112,7 +135,7 @@ L.push(
   "|---|---|---|---|---|---|",
 );
 for (const t of tiers) {
-  const rs = cur.filter((r) => r.s.tier === t);
+  const rs = curFor(t);
   if (!rs.length) continue;
   const ok = rs.flatMap((r) => r.loops).filter((l) => l.ok);
   const all = rs.reduce((a, r) => a + r.loops.length, 0);
@@ -126,10 +149,48 @@ for (const t of tiers) {
 L.push(
   "",
   "- **A** counts Base Sepolia blocks (200 ms each) between the open and the repayment: the most RPC-independent measure, 200 ms resolution.",
-  "- **B** subtracts the open → fill time from A. That time runs from when the bench got the open's receipt to when the solver got its fill receipt, so a slow fill receipt makes B read low. It does on the delayed tiers, run four orders at a time: B is about 4 s under C there.",
+  "- **B** subtracts the open → fill time from A. That time runs from when the bench got the open's receipt to when the solver got its fill receipt (both on one machine's clock), so it can be off by an RPC round trip either way.",
   "- **C** uses each chain's block timestamps, which are whole seconds and come from two different chains: it reads low by up to a second and can't resolve below 1 s.",
   "- **D** is when one observer polling public RPCs every ~150 ms first saw each event: an upper bound.",
   "- Delayed tiers include their policy delay (30 s / 300 s) plus the confirm on Unichain.",
+  `- Each tier uses its runs from the current solver build (\`${latestBuild ?? "n/a"}\`) when it has any; ${[...new Set(tiers.filter((t) => !curFor(t).some((r) => r.build === latestBuild)))].map((t) => `tier ${t}`).join(", ") || "none"} still show the previous build. All runs stay listed in \`evidence/live/\`.`,
+  "",
+);
+// ---------------------------------------------------------------- optimisation, measured
+{
+  const fillsByOrder = new Map(readJsonl<{ orderId: string; fillTx?: string; seenAtMs?: number }>(join(evDir, "solver", "fills.jsonl")).filter((r) => r.fillTx).map((r) => [r.orderId.toLowerCase(), r]));
+  // Same contracts on both sides of the comparison: the latest deployment with tier-0 runs from both solver builds.
+  const prevBuild = builds.length > 1 ? builds[builds.length - 2].build : null;
+  const both = (v: string) => runs.some((r) => r.ver === v && r.s.tier === 0 && r.build === prevBuild) && runs.some((r) => r.ver === v && r.s.tier === 0 && r.build === latestBuild);
+  const cmpVer = [CURRENT, "v3", "v2", "v1"].find(both);
+  const t0runs = runs.filter((r) => r.s.tier === 0 && r.ver === cmpVer);
+  const byBuild = (b: string | null) => t0runs.filter((r) => r.build === b).flatMap((r) => r.loops).filter((l) => l.ok);
+  const stat = (v: number[]) => (v.length ? `${sec(pct(v, 50))} · ${sec(pct(v, 95))}` : "—");
+  const detect = (ls: Loop[]) => ls.map((l) => { const f = fillsByOrder.get(l.orderId.toLowerCase()); const o = (l as unknown as { seenAtMs?: { open?: number } }).seenAtMs?.open; return f?.seenAtMs !== undefined && o !== undefined ? f.seenAtMs - o : undefined; }).filter((x): x is number => x !== undefined);
+  const A = (ls: Loop[]) => ls.map((l) => num(l.seg.fullBase_ms)).filter((x): x is number => x !== undefined);
+  const Cfull = (ls: Loop[]) => ls.map((l) => num(l.seg.full_s)).filter((x): x is number => x !== undefined).map((x) => x * 1000);
+  const prevB = builds.length > 1 ? builds[builds.length - 2].build : null;
+  const before = byBuild(prevB), after = byBuild(latestBuild);
+  if (before.length && after.length) {
+    L.push(
+      "### Optimisation, measured",
+      "",
+      `The whole loop includes our solver's reaction. Tier 0 on the ${cmpVer} contracts (the same contracts on both sides), before (\`${prevB}\`, ${before.length} loops) and after (\`${latestBuild}\`, ${after.length} loops) the solver change. p50 · p95.`,
+      "",
+      "| What | Before | After | How measured |",
+      "|---|---|---|---|",
+      `| Solver hears of the order (bench's open receipt → solver sees \`Opened\`) | ${stat(detect(before))} | ${stat(detect(after))} | \`solver/fills.jsonl\` \`seenAtMs\` minus the run's \`seenAtMs.open\`; negative means the solver saw it before the bench's own receipt returned |`,
+      `| Whole loop, Base blocks ×200 ms (clock A) | ${stat(A(before))} | ${stat(A(after))} | origin blocks between open and repayment |`,
+      `| Whole loop, block timestamps | ${stat(Cfull(before))} | ${stat(Cfull(after))} | open block → repayment block, 1 s resolution |`,
+      "| Reactive transactions per order | | 2 on sight · 3 delayed · 2 refunded | `test_reactiveTxsPerOrder` counts the logs that match a subscription; the callbacks' own events trigger none |",
+      "| lREACT per order | | ~0.045 | reactive contract balance before and after ~175 orders on v3 (`docs/06-mainnet-path.md`) |",
+      "",
+      ...builds.map((b) => `- \`${b.build}\` (from ${b.from}): ${b.note}`),
+      "",
+    );
+  }
+}
+L.push(
   "",
   "## 4. Refused on-chain",
   "",
@@ -149,7 +210,7 @@ L.push(
   "| What | Count | Where |",
   "|---|---|---|",
 );
-const vers = [CURRENT, ...["v2", "v1"].filter((v) => v !== CURRENT)];
+const vers = [CURRENT, ...["v3", "v2", "v1"].filter((v) => v !== CURRENT)];
 const perVer = (f: (r: Run) => number) => vers.map((v) => `${v}: ${runs.filter((r) => r.ver === v).reduce((a, r) => a + f(r), 0)}`).join(" · ");
 const backfilled = runs.reduce((a, r) => a + r.loops.filter((l) => l.settleSeenBy === "backfill").length, 0);
 L.push(
@@ -160,13 +221,14 @@ L.push(
   "| Solver process crashed on an RPC timeout (fixed: scan errors no longer stop it) | 1 | `docs/DECISIONS.md` |",
   "| Solver stalled after its log cursor fell >200 Base blocks behind (bug introduced by the speed-up, fixed); 3 tier-0 orders went unfilled and were refunded | 1 | `docs/DECISIONS.md` |",
   "| Interrupted run kept, not deleted | 1 | `bench-tier2-2026-11-15T18-38-52-553Z` |",
+  `| Bench measured open → fill for delayed orders from the wrong log line (the later \`confirm\` entry), so it fell back to its own slower sighting; clock B read seconds low on tiers 1–2. Fixed in the bench; earlier loops corrected here from the solver's fill receipts (raw \`loops.jsonl\` unchanged) | ${correctedLoops} loops corrected | \`evidence/live/solver/fills.jsonl\`, \`docs/DECISIONS.md\` |`,
 );
 if (reorg) L.push(`| Reorg check: recorded transactions re-fetched on ${reorg.at.slice(0, 10)}; missing / moved block / now failed | ${reorg.missing} / ${reorg.changedBlock} / ${reorg.failedNow} of ${reorg.checked} | \`evidence/live/reorg-check.json\` |`);
 L.push(
   "",
   "## 6. Previous deployments",
   "",
-  "v2: as v3 but `open()` accepted any token and amount (addresses in `contracts/deployments/live-v2/`). v1: no confirm step; delayed tiers drained on Cron10 (`contracts/deployments/live-v1/`). Their runs, kept as recorded:",
+  "v3: as v4 without gasless `openFor` (`contracts/deployments/live-v3/`). v2: as v3 but `open()` accepted any token and amount (`live-v2/`). v1: no confirm step; delayed tiers drained on Cron10 (`live-v1/`). Their runs, kept as recorded:",
   "",
   "| Run | Contracts | Tier | Settled / recorded | Bench errors |",
   "|---|---|---|---|---|",

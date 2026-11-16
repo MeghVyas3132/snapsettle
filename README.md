@@ -51,6 +51,7 @@ solver repaid (capped per hour)
 - **Finality is chosen per order.** Reactive treats an observed event as canonical even if that chain later reorganises. Small orders accept that and settle on sight. Larger orders wait 30 s or 300 s, and then settle only from `Confirmed`, which `DestinationSettler.confirm()` emits when the delay has passed **and** the fill is still in Unichain's state. A fill removed by a reorg during the wait cannot be confirmed, so nobody is paid for it, and the user can get a refund.
 - **Who acts.** For on-sight orders, nobody does after the fill: Reactive's network observes and calls back. For delayed orders the solver sends one `confirm` transaction on Unichain; that transaction is what re-reads the destination state. There is no cron.
 - **Blast radius.** `OriginEscrow` releases at most 500 USDC per hour through the Reactive path (testnet setting). If Reactive were faulty or compromised, that bounds what it could pay out before the fast path stops; anything over the cap is deferred and released when the window has room.
+- **One signature, no gas.** A user can open an order by signing one EIP-3009 authorization on USDC, with no approval and no ETH. Anyone submits it through `openFor` and pays the gas; the authorization's nonce is derived from the exact order, so the submitter cannot change a term (`test/Gasless.t.sol`, and an on-chain refusal case).
 - **ERC-7683.** `SnapsettleResolver` implements the resolver-centric draft. A generic solver gets the fill step, the confirm step for delayed orders, the payment with `estimatedDelaySeconds` (the order's tier delay plus measured loop latency) and two named assumptions, `reactive-settlement` and `reactive-origin-finality`. Our solver bot uses only what the resolver returns.
 
 ## The trade, stated plainly
@@ -70,6 +71,17 @@ The advantage depends on the tier, because the tiers deliberately add delay wher
 
 Volumes are an illustration, not a measurement. Measured times per tier are in [JUDGE.md §3](JUDGE.md#3-latency-on-the-current-contracts-four-clocks). Testnet tier thresholds are tiny (0.5 / 2 USDC) so the bench can run on faucet funds; on mainnet they would be set by value at risk.
 
+### What we changed to get here, measured
+
+| Change | Before | After | Evidence |
+|---|---|---|---|
+| Solver hears of new orders by WebSocket push instead of HTTP polling; nonce kept locally | solver noticed an order 3.5 s after it was mined | before the bench's own receipt returned | [JUDGE.md §3, "Optimisation, measured"](JUDGE.md#optimisation-measured) |
+| Same change, effect on the whole loop (small orders, open → solver repaid) | 6.6 s p50 · 8.6 s p95 | 2.8 s p50 · 3.8 s p95 | same |
+| Reactive transactions per order (what the reactive contract pays for) | | 2 on sight · 3 delayed · 2 refunded | `test_reactiveTxsPerOrder` |
+| Cost on Lasna | | ~0.045 lREACT per order | [docs/06-mainnet-path.md](docs/06-mainnet-path.md) |
+
+The Reactive part (fill → solver repaid) did not change: it was already about a second on the chains' block clocks. The whole loop was waiting on our own solver.
+
 ## Prior art, and what is new
 
 | | Who confirms the fill | Who must send a transaction | Repayment delay | How the delay is published |
@@ -86,10 +98,25 @@ What is new is narrow, and we state it that way: an ERC-7683 settlement whose at
 
 The core check needs two events on two chains: `Opened` on Base and `Filled` (or `Confirmed`) on Unichain. A contract on either chain cannot see the other. An off-chain bot could, and could be faster, but it would then be a trusted operator (Relay's model). Reactive makes the observer a network and the callback a protocol transaction, so the escrow trusts one reactive contract address on Lasna instead of a company's key.
 
+## Use it from your app
+
+`packages/sdk` (`@snapsettle/sdk`, not yet on npm) wraps the deployed contracts: build an order, have the user sign once, relay it, and follow it across the three chains.
+
+```ts
+import { buildOrder, signGaslessOrder, relayOrder, trackOrder } from "@snapsettle/sdk";
+
+const order = buildOrder({ amount: 250_000n, recipient: user });   // 0.25 USDC
+const signed = await signGaslessOrder({ wallet, order });            // one wallet prompt, no gas
+const { orderId } = await relayOrder({ api: RELAY_URL, signed });    // or submitSignedOrder({ wallet: relayer, signed })
+await trackOrder({ orderId, onEvent: (e) => console.log(e.kind) });  // opened → filled → accepted → repaid
+```
+
+Its tests run against the live contracts, including a full gasless order to repayment: `cd packages/sdk && pnpm install && pnpm test`.
+
 ## Run it
 
 ```bash
-# contracts: 36 tests, including fuzzing, a reorg case, the outflow cap and spam rejection
+# contracts: 43 tests, including fuzzing, a reorg case, the outflow cap, spam rejection and gasless opening
 cd contracts && forge test
 
 # your own solver against the live contracts, in three commands
@@ -114,6 +141,7 @@ SNAP_ENV=live pnpm walletcheck               # clicks "Open your own order" on t
 | Path | What |
 |---|---|
 | `contracts/` | Foundry: `OriginEscrow`, `DestinationSettler`, `SnapsettleReactive`, `SnapsettleResolver`, tests |
+| `packages/sdk/` | `@snapsettle/sdk`: open, sign (gasless), relay and track orders from an app; addresses and ABIs generated from the deployments |
 | `offchain/` | viem/TypeScript: generic ERC-7683 solver, bench, refusal cases, demo service, recovery, reorg check, JUDGE.md generator |
 | `dashboard/` | The site (Vite, Three.js, viem), deployed to GitHub Pages |
 | `evidence/live/` | Every bench run, refusal run, refund and the reorg check, as recorded |

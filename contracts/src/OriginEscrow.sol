@@ -8,6 +8,19 @@ import {IPayable} from "@reactive/src/interfaces/IPayable.sol";
 import {AbstractCallback} from "@reactive/src/base/AbstractCallback.sol";
 import {OrderData, OrderLib} from "./OrderTypes.sol";
 
+/// @dev EIP-3009, as implemented by Circle's USDC (FiatTokenV2_2): the payee pulls funds with the payer's signature.
+interface IERC3009 {
+    function receiveWithAuthorization(
+        address from,
+        address to,
+        uint256 value,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce,
+        bytes calldata signature
+    ) external;
+}
+
 /// @title OriginEscrow
 /// @notice Origin side of Snapsettle (Base Sepolia). Users open orders here and their input is escrowed.
 ///         Only the Snapsettle reactive contract, through the Reactive callback proxy, can release the
@@ -88,6 +101,7 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
     error BadCap();
     error TokenNotAllowed();
     error BelowMinimum(uint256 minInputAmount);
+    error ZeroUser();
 
     constructor(
         IPayable callbackProxy_,
@@ -115,6 +129,36 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
 
     /// @notice Opens an order and escrows `d.inputAmount` of `d.inputToken` (approve first).
     function open(OrderData calldata d) external nonReentrant returns (bytes32 id) {
+        id = _record(d, msg.sender);
+        IERC20(d.inputToken).safeTransferFrom(msg.sender, address(this), d.inputAmount);
+        emit Opened(id, msg.sender, d);
+    }
+
+    /// @notice Gasless open, in the spirit of ERC-7683 `openFor`: `user` signs one EIP-3009
+    ///         `ReceiveWithAuthorization` for `d.inputAmount`, payable to this escrow, whose nonce is
+    ///         `gaslessNonce(d)`. Anyone (a relayer) submits it and pays the gas. The nonce binds the exact order,
+    ///         so a relayer cannot change any term: a different order gives a different nonce and the token
+    ///         rejects the signature. The token also enforces single use and the validity window.
+    function openFor(OrderData calldata d, address user, uint256 validAfter, uint256 validBefore, bytes calldata signature)
+        external
+        nonReentrant
+        returns (bytes32 id)
+    {
+        if (user == address(0)) revert ZeroUser();
+        id = _record(d, user);
+        IERC3009(d.inputToken).receiveWithAuthorization(
+            user, address(this), d.inputAmount, validAfter, validBefore, gaslessNonce(d), signature
+        );
+        emit Opened(id, user, d);
+    }
+
+    /// @notice The EIP-3009 nonce a user signs for a gasless order: unique to this escrow, this chain and these terms.
+    function gaslessNonce(OrderData calldata d) public view returns (bytes32) {
+        return keccak256(abi.encode("snapsettle.openFor", block.chainid, address(this), OrderLib.hash(d)));
+    }
+
+    /// @dev Checks shared by both ways of opening, then records the order before any token moves.
+    function _record(OrderData calldata d, address user) internal returns (bytes32 id) {
         if (d.inputAmount == 0 || d.outputAmount == 0) revert ZeroAmount();
         if (d.recipient == address(0) || d.inputToken == address(0) || d.outputToken == address(0)) {
             revert ZeroAddress();
@@ -128,11 +172,8 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
         // An order larger than the cap could never be released through the fast path.
         if (d.inputAmount > outflowCap) revert OverOutflowCap();
 
-        id = OrderLib.orderId(block.chainid, address(this), msg.sender, nonces[msg.sender]++, d);
-        orders[id] = Order(msg.sender, d.inputToken, d.inputAmount, d.fillDeadline, Status.Open, OrderLib.hash(d));
-
-        IERC20(d.inputToken).safeTransferFrom(msg.sender, address(this), d.inputAmount);
-        emit Opened(id, msg.sender, d);
+        id = OrderLib.orderId(block.chainid, address(this), user, nonces[user]++, d);
+        orders[id] = Order(user, d.inputToken, d.inputAmount, d.fillDeadline, Status.Open, OrderLib.hash(d));
     }
 
     /// @notice Asks the reactive contract to refund an expired, unfilled order. The refund itself

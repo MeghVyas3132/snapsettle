@@ -211,6 +211,11 @@ export class ClockScene {
   private timer = new THREE.Timer();
   private dpr: number;
   private frameMs: number[] = [];
+  /** Low-power mode: no ambient occlusion, anti-aliasing or shadows, lower resolution, at most ~20 frames a second.
+   *  Entered up front on a software renderer, or after two seconds of very slow frames. */
+  lowPower = false;
+  private smaaPass!: EffectPass;
+  private lastRender = 0;
   private lastShadowKey = "";
   private ledFlash = 0;
   readonly lcdLeft: Lcd;
@@ -262,7 +267,9 @@ export class ClockScene {
     const noise = new NoiseEffect({ premultiply: true, blendFunction: BlendFunction.SOFT_LIGHT });
     noise.blendMode.opacity.value = 0.035;
     this.composer.addPass(new EffectPass(this.camera, bloom, tone, vignette, noise));
-    this.composer.addPass(new EffectPass(this.camera, new SMAAEffect({ preset: SMAAPreset.HIGH })));
+    this.smaaPass = new EffectPass(this.camera, new SMAAEffect({ preset: SMAAPreset.HIGH }));
+    this.composer.addPass(this.smaaPass);
+    if (softwareRenderer(this.renderer)) this.enterLowPower("software renderer");
 
     addEventListener("resize", () => this.resize());
     addEventListener("pointermove", (e) => {
@@ -811,8 +818,30 @@ export class ClockScene {
     this.composer.setSize(w, h);
   }
 
-  /** Drops the pixel ratio a step when frames run long, so scrolling stays smooth on slower GPUs. */
+  private enterLowPower(why: string) {
+    if (this.lowPower) return;
+    this.lowPower = true;
+    // Remove the passes rather than disable them: a disabled N8AO pass leaves its output buffer empty.
+    this.composer.removePass(this.ao);
+    this.composer.removePass(this.smaaPass);
+    this.renderer.shadowMap.enabled = false;
+    this.dpr = Math.min(this.dpr, 0.75);
+    this.renderer.setPixelRatio(this.dpr);
+    this.resize();
+    document.documentElement.dataset.lowpower = "true";
+    console.info(`snapsettle: low-power rendering (${why})`);
+  }
+
+  /** Drops the pixel ratio a step when frames run long, so scrolling stays smooth on slower GPUs. Frames that run
+   *  very long (no GPU) switch to low-power mode within about two seconds instead of waiting for 90 frames. */
+  private slowSince = 0;
   private adapt(ms: number) {
+    if (!this.lowPower && ms > 120) {
+      this.slowSince ||= performance.now();
+      if (performance.now() - this.slowSince > 2000) this.enterLowPower("slow frames");
+    } else if (ms < 60) {
+      this.slowSince = 0;
+    }
     this.frameMs.push(ms);
     if (this.frameMs.length < 90) return;
     const avg = this.frameMs.reduce((a, b) => a + b, 0) / this.frameMs.length;
@@ -832,6 +861,12 @@ export class ClockScene {
   private v = new THREE.Vector3();
   private rockerNow = 1;
   private frame() {
+    // Low power: skip frames so the page's own work (reading the chains, clicks) always gets the main thread.
+    if (this.lowPower) {
+      const now = performance.now();
+      if (now - this.lastRender < 50) return;
+      this.lastRender = now;
+    }
     this.timer.update();
     const dtRaw = this.timer.getDelta();
     const dt = Math.min(dtRaw, 0.05);
@@ -907,6 +942,19 @@ export class ClockScene {
 
     this.composer.render(dt);
     this.onFrame?.();
+  }
+}
+
+/** True when WebGL runs on the CPU (SwiftShader, llvmpipe, Microsoft Basic Render): the full effect stack would
+ *  starve the page. */
+function softwareRenderer(r: THREE.WebGLRenderer): boolean {
+  try {
+    const gl = r.getContext();
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    return /swiftshader|llvmpipe|software|basic render/i.test(name);
+  } catch {
+    return false;
   }
 }
 

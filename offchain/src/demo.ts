@@ -7,8 +7,12 @@
 // HTTP:
 //   GET  /status  → { env, address, lastOrder, nextHeartbeatInS, todayCount, cap }
 //   POST /order   → { orderId, openTx }   (rate limited: one order per 40 s overall, 4 per hour per IP, a daily cap)
+//   POST /relay   { order, user, validAfter, validBefore, signature } → { orderId, openTx }
+//                 Gasless open: the visitor signed one EIP-3009 authorization in their wallet; this service submits
+//                 `openFor` and pays the gas. Terms are checked here and again by the escrow; the signature binds them.
+//   POST /drip    { address } → { tx, amount }   0.3 test USDC on Base Sepolia, once per address per day
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { maxUint256, parseEventLogs, type Hex } from "viem";
+import { getAddress, isAddress, maxUint256, parseEventLogs, type Address, type Hex } from "viem";
 import { ENV, chains, pub, addr, abi, wallet, evidenceDir, appendJsonl, sleep, type OrderData } from "./common.ts";
 
 if (ENV !== "live") throw new Error("demo runs against live testnets only (SNAP_ENV=live)");
@@ -34,6 +38,68 @@ let lastOrder: { orderId: Hex; openTx: Hex; at: string; source: string } | null 
 let nextBeat = Date.now() + INTERVAL_S * 1000;
 const day = { key: "", count: 0 };
 const perIp = new Map<string, number[]>();
+const relayLog = `${evidenceDir("demo")}/relayed.jsonl`;
+const dripLog = `${evidenceDir("demo")}/drips.jsonl`;
+const DRIP = 300_000n; // 0.3 USDC
+const RELAY_MAX = 5_000_000n; // 5 USDC: covers every tier on testnet
+const limits = { relayPerIpHour: 6, dripPerIpDay: 3, dripDaily: 60, relayDaily: 200 };
+const hitsRelay = new Map<string, number[]>();
+const hitsDrip = new Map<string, number[]>();
+const dripped = new Map<string, number>(); // address → last drip
+const daily = { key: "", relay: 0, drip: 0 };
+const recent = (m: Map<string, number[]>, k: string, ms: number) => (m.get(k) ?? []).filter((t) => Date.now() - t < ms);
+function rollDay() { const k = new Date().toISOString().slice(0, 10); if (daily.key !== k) Object.assign(daily, { key: k, relay: 0, drip: 0 }); }
+/** One sender at a time from the service wallet, so its nonces never collide (heartbeat, relay, drip). */
+let chain: Promise<unknown> = Promise.resolve();
+const serial = <T>(f: () => Promise<T>): Promise<T> => { const p = chain.then(f, f); chain = p.catch(() => undefined); return p; };
+
+async function readBody(req: IncomingMessage): Promise<unknown> {
+  let raw = "";
+  for await (const c of req) { raw += c; if (raw.length > 4096) throw new Error("body too large"); }
+  return JSON.parse(raw || "{}");
+}
+
+type RelayBody = { order: Record<string, string | number>; user: string; validAfter: string | number; validBefore: string | number; signature: string };
+/** Checks a visitor's gasless order before spending gas on it. The escrow repeats the binding checks on-chain. */
+function vetRelay(b: RelayBody): { order: OrderData; user: Address; validAfter: bigint; validBefore: bigint; signature: Hex } {
+  const o = b.order ?? {};
+  if (!isAddress(String(b.user))) throw new Error("bad user address");
+  if (!/^0x[0-9a-fA-F]{130,}$/.test(String(b.signature))) throw new Error("bad signature");
+  const order: OrderData = {
+    inputToken: getAddress(String(o.inputToken)), inputAmount: BigInt(o.inputAmount), outputToken: getAddress(String(o.outputToken)),
+    outputAmount: BigInt(o.outputAmount), recipient: getAddress(String(o.recipient)), destinationChainId: BigInt(o.destinationChainId),
+    destinationSettler: getAddress(String(o.destinationSettler)), fillDeadline: Number(o.fillDeadline),
+  };
+  const now = Math.floor(Date.now() / 1000);
+  if (order.inputToken !== getAddress(addr.tokenOrigin) || order.outputToken !== getAddress(addr.tokenDest)) throw new Error("wrong token pair");
+  if (order.destinationSettler !== getAddress(addr.destinationSettler) || order.destinationChainId !== BigInt(chains.dest.id)) throw new Error("wrong destination");
+  if (order.inputAmount > RELAY_MAX) throw new Error("relayed orders are capped at 5 USDC on testnet");
+  if (order.outputAmount > order.inputAmount) throw new Error("output above input; no solver would fill it");
+  if (order.fillDeadline < now + 60 || order.fillDeadline > now + 3600) throw new Error("deadline must be 1 to 60 minutes away");
+  const validBefore = BigInt(b.validBefore);
+  if (validBefore < BigInt(now + 30) || validBefore > BigInt(now + 1800)) throw new Error("authorization must be valid for 30 s to 30 min");
+  return { order, user: getAddress(String(b.user)), validAfter: BigInt(b.validAfter), validBefore, signature: String(b.signature) as Hex };
+}
+
+async function relay(v: ReturnType<typeof vetRelay>, ip: string) {
+  // Simulate first: a bad signature or a changed term fails here and costs nothing.
+  const { request } = await pub.origin.simulateContract({ address: addr.escrow, abi: abi.escrow, functionName: "openFor", args: [v.order, v.user, v.validAfter, v.validBefore, v.signature], account: user.account! });
+  const hash = await serial(() => user.writeContract({ ...request, chain: chains.origin, account: user.account! }));
+  const rcpt = await pub.origin.waitForTransactionReceipt({ hash });
+  if (rcpt.status !== "success") throw new Error(`openFor reverted: ${hash}`);
+  const orderId = (parseEventLogs({ abi: abi.escrow, logs: rcpt.logs, eventName: "Opened" })[0].args as { orderId: Hex }).orderId;
+  appendJsonl(relayLog, { at: new Date().toISOString(), orderId, openTx: hash, user: v.user, amount: v.order.inputAmount.toString(), ip: ip.replace(/\.\d+$/, ".x") });
+  return { orderId, openTx: hash };
+}
+
+async function drip(to: Address, ip: string) {
+  const have = await erc20Bal(addr.tokenOrigin, "origin", to);
+  if (have >= DRIP) return { tx: null, amount: "0", note: "already holds enough test USDC" };
+  const hash = await serial(() => user.writeContract({ address: addr.tokenOrigin, abi: abi.erc20, functionName: "transfer", args: [to, DRIP], chain: chains.origin, account: user.account! }));
+  await pub.origin.waitForTransactionReceipt({ hash });
+  appendJsonl(dripLog, { at: new Date().toISOString(), to, amount: DRIP.toString(), tx: hash, ip: ip.replace(/\.\d+$/, ".x") });
+  return { tx: hash, amount: DRIP.toString() };
+}
 
 const erc20Bal = (token: `0x${string}`, c: "origin" | "dest", who: `0x${string}`) =>
   pub[c].readContract({ address: token, abi: abi.erc20, functionName: "balanceOf", args: [who] }) as Promise<bigint>;
@@ -93,7 +159,7 @@ async function guarded(source: string, ip?: string) {
   if (busy) throw new Error("an order is being opened right now");
   busy = true;
   try {
-    const r = await openOrder(source);
+    const r = await serial(() => openOrder(source));
     lastAt = Date.now();
     day.count++;
     if (ip) perIp.set(ip, [...(perIp.get(ip) ?? []).filter((t) => Date.now() - t < 3_600_000), Date.now()]);
@@ -139,6 +205,37 @@ async function main() {
         return send(req, res, 200, await guarded("visitor", ip));
       } catch (e) {
         return send(req, res, 503, { error: (e as Error).message.split("\n")[0], lastOrder });
+      }
+    }
+    if (req.method === "POST" && req.url === "/relay") {
+      rollDay();
+      if (daily.relay >= limits.relayDaily) return send(req, res, 429, { error: "daily relay cap reached; open the order from your wallet instead" });
+      if (recent(hitsRelay, ip, 3_600_000).length >= limits.relayPerIpHour) return send(req, res, 429, { error: "a few relayed orders per hour per visitor" });
+      try {
+        const v = vetRelay((await readBody(req)) as RelayBody);
+        hitsRelay.set(ip, [...recent(hitsRelay, ip, 3_600_000), Date.now()]);
+        daily.relay++;
+        return send(req, res, 200, await relay(v, ip));
+      } catch (e) {
+        const m = (e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message;
+        return send(req, res, 400, { error: m.split("\n")[0] });
+      }
+    }
+    if (req.method === "POST" && req.url === "/drip") {
+      rollDay();
+      try {
+        const b = (await readBody(req)) as { address?: string };
+        if (!isAddress(String(b.address))) return send(req, res, 400, { error: "bad address" });
+        const to = getAddress(String(b.address));
+        if (daily.drip >= limits.dripDaily) return send(req, res, 429, { error: "daily drip cap reached; use faucet.circle.com" });
+        if (Date.now() - (dripped.get(to) ?? 0) < 86_400_000) return send(req, res, 429, { error: "this address already got test USDC today" });
+        if (recent(hitsDrip, ip, 86_400_000).length >= limits.dripPerIpDay) return send(req, res, 429, { error: "a few drips per visitor per day" });
+        dripped.set(to, Date.now());
+        hitsDrip.set(ip, [...recent(hitsDrip, ip, 86_400_000), Date.now()]);
+        daily.drip++;
+        return send(req, res, 200, await drip(to, ip));
+      } catch (e) {
+        return send(req, res, 503, { error: (e as Error).message.split("\n")[0] });
       }
     }
     send(req, res, 404, { error: "not found" });

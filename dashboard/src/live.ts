@@ -2,15 +2,18 @@
 // open one; either way the clock and the circuit follow that real order through its four transactions.
 import { createPublicClient, createWalletClient, custom, http, parseEventLogs, parseAbi, type Address, type Hex, type EIP1193Provider } from "viem";
 import { baseSepolia } from "viem/chains";
-import { store, link, short, fmtS, crossChain } from "./data";
+import { store, link, short, fmtS, crossChain, esc } from "./data";
 import type { ClockScene } from "./scene";
 import { state } from "./scene";
 
+const ORDER_T = "(address inputToken, uint256 inputAmount, address outputToken, uint256 outputAmount, address recipient, uint256 destinationChainId, address destinationSettler, uint32 fillDeadline)";
 const ESCROW_ABI = parseAbi([
+  `function gaslessNonce(${ORDER_T} d) view returns (bytes32)`,
+  `function openFor(${ORDER_T} d, address user, uint256 validAfter, uint256 validBefore, bytes signature) returns (bytes32)`,
   "function open((address inputToken, uint256 inputAmount, address outputToken, uint256 outputAmount, address recipient, uint256 destinationChainId, address destinationSettler, uint32 fillDeadline) d) returns (bytes32)",
   "event Opened(bytes32 indexed orderId, address indexed user, (address inputToken, uint256 inputAmount, address outputToken, uint256 outputAmount, address recipient, uint256 destinationChainId, address destinationSettler, uint32 fillDeadline) order)",
 ]);
-const ERC20_ABI = parseAbi(["function balanceOf(address) view returns (uint256)", "function allowance(address,address) view returns (uint256)", "function approve(address,uint256) returns (bool)"]);
+const ERC20_ABI = parseAbi(["function balanceOf(address) view returns (uint256)", "function allowance(address,address) view returns (uint256)", "function approve(address,uint256) returns (bool)", "function name() view returns (string)", "function version() view returns (string)"]);
 const FAUCETS = {
   usdc: "https://faucet.circle.com",
   eth: "https://docs.base.org/base-chain/tools/network-faucets",
@@ -40,17 +43,34 @@ const amount = () => (store.tiers[0] ? store.tiers[0].maxAmount / 2n || 1n : 250
 
 // ------------------------------------------------------------ wallet
 
+const li = (t: string, body: string) => `<li data-on="true"><span class="verify__t">${t}</span><span>${body}</span></li>`;
+async function post<T>(path: string, body: unknown): Promise<T & { error?: string }> {
+  const r = await fetch(`${store.config.demoApi}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  return (await r.json()) as T & { error?: string };
+}
+
+/**
+ * The visitor's own order, with as few steps as the setup allows:
+ *  - Demo service reachable: one signature in the wallet, no gas, no approval. The service relays `openFor`
+ *    (and can send 0.3 test USDC first). No Base Sepolia ETH needed.
+ *  - Not reachable: the same signature, then the visitor submits `openFor` themselves (needs a little ETH).
+ * The signature is EIP-3009 `ReceiveWithAuthorization` on USDC, with a nonce the escrow derives from the exact
+ * order, so whoever submits it cannot change a single term.
+ */
 export async function openOwnOrder() {
   const eth = (window as unknown as { ethereum?: EIP1193Provider }).ethereum;
   deps.open("Your order, live on testnet", "live");
   const a = store.config.addresses;
+  const relayer = Boolean(store.config.demoApi);
   if (!eth) {
-    deps.steps(`<li data-on="true"><span class="verify__t">—</span><span>No browser wallet found on this page. Install one that supports testnets (MetaMask, Rabby), or press <b>Replay a recorded loop</b> to step through a real one.</span></li>`);
+    deps.steps(li("—", "No browser wallet found on this page. Install one that supports testnets (MetaMask, Rabby), or press <b>Replay a recorded loop</b> to step through a real one."));
     return;
   }
+  const done: string[] = [];
+  const show = (t: string, body: string) => deps.steps(done.join("") + li(t, body));
   try {
     const wallet = createWalletClient({ chain: baseSepolia, transport: custom(eth) });
-    deps.steps(`<li data-on="true"><span class="verify__t">1/4</span><span>Connect your wallet</span><span>…</span></li>`);
+    show("1/3", "Connect your wallet …");
     const [account] = await wallet.requestAddresses();
     try {
       await wallet.switchChain({ id: baseSepolia.id });
@@ -58,37 +78,75 @@ export async function openOwnOrder() {
       await wallet.addChain({ chain: baseSepolia });
       await wallet.switchChain({ id: baseSepolia.id });
     }
+    done.push(li("1/3", `Connected ${short(account)} on Base Sepolia`));
     const pub = createPublicClient({ chain: baseSepolia, transport: http(store.config.rpc.origin) });
     const need = amount();
     const [usdc, eth0] = await Promise.all([
       pub.readContract({ address: a.tokenOrigin!, abi: ERC20_ABI, functionName: "balanceOf", args: [account] }),
       pub.getBalance({ address: account }),
     ]);
-    if (usdc < need || eth0 === 0n) {
-      deps.steps(`<li data-on="true"><span class="verify__t">need</span><span>${usdc < need ? `${Number(need) / 1e6} test USDC on Base Sepolia (<a href="${FAUCETS.usdc}" target="_blank" rel="noopener">Circle faucet</a>)` : ""}${usdc < need && eth0 === 0n ? " and " : ""}${eth0 === 0n ? `a little Base Sepolia ETH for gas (<a href="${FAUCETS.eth}" target="_blank" rel="noopener">faucets</a>)` : ""}. Then press the button again.</span></li>`);
+
+    if (usdc < need) {
+      if (!relayer) {
+        show("need", `${Number(need) / 1e6} test USDC on Base Sepolia (<a href="${FAUCETS.usdc}" target="_blank" rel="noopener">Circle faucet</a>), then press the button again.`);
+        return;
+      }
+      show("2/3", "Sending you 0.3 test USDC on Base Sepolia …");
+      const d = await post<{ tx: Hex | null }>("/drip", { address: account });
+      if (d.error) {
+        show("need", `${esc(d.error)}. Get test USDC from the <a href="${FAUCETS.usdc}" target="_blank" rel="noopener">Circle faucet</a>, then press the button again.`);
+        return;
+      }
+      done.push(li("2/3", `0.3 test USDC sent ${d.tx ? link("origin", "tx", d.tx) : ""}`));
+    }
+    if (!relayer && eth0 === 0n) {
+      show("need", `A little Base Sepolia ETH for gas (<a href="${FAUCETS.eth}" target="_blank" rel="noopener">faucets</a>), then press the button again.`);
       return;
     }
-    const allowance = await pub.readContract({ address: a.tokenOrigin!, abi: ERC20_ABI, functionName: "allowance", args: [account, a.escrow!] });
-    if (allowance < need) {
-      deps.steps(`<li data-on="true"><span class="verify__t">2/4</span><span>Approve ${Number(need) / 1e6} USDC to the escrow</span><span>…</span></li>`);
-      const h = await wallet.writeContract({ account, address: a.tokenOrigin!, abi: ERC20_ABI, functionName: "approve", args: [a.escrow!, need], chain: baseSepolia });
-      await pub.waitForTransactionReceipt({ hash: h });
-    }
-    deps.steps(`<li data-on="true"><span class="verify__t">3/4</span><span>Open the order: ${Number(need) / 1e6} USDC on Base Sepolia → ${(Number(need) * 0.999) / 1e6} USDC to you on Unichain Sepolia</span><span>…</span></li>`);
-    const hash = await wallet.writeContract({
-      account, address: a.escrow!, abi: ESCROW_ABI, functionName: "open", chain: baseSepolia,
-      args: [{
-        inputToken: a.tokenOrigin!, inputAmount: need, outputToken: a.tokenDest!, outputAmount: (need * 999n) / 1000n,
-        recipient: account as Address, destinationChainId: BigInt(store.config.chains.dest), destinationSettler: a.destinationSettler!,
-        fillDeadline: Math.floor(Date.now() / 1000) + 600,
-      }],
+
+    const order = {
+      inputToken: a.tokenOrigin!, inputAmount: need, outputToken: a.tokenDest!, outputAmount: (need * 999n) / 1000n,
+      recipient: account as Address, destinationChainId: BigInt(store.config.chains.dest), destinationSettler: a.destinationSettler!,
+      fillDeadline: Math.floor(Date.now() / 1000) + 600,
+    };
+    const [nonce, name, version] = await Promise.all([
+      pub.readContract({ address: a.escrow!, abi: ESCROW_ABI, functionName: "gaslessNonce", args: [order] }),
+      pub.readContract({ address: a.tokenOrigin!, abi: ERC20_ABI, functionName: "name" }),
+      pub.readContract({ address: a.tokenOrigin!, abi: ERC20_ABI, functionName: "version" }),
+    ]);
+    const validBefore = BigInt(Math.floor(Date.now() / 1000) + 600);
+    show("sign", `Sign once: ${Number(need) / 1e6} USDC from you to the escrow for this order. ${relayer ? "No gas, no approval." : "No approval."} …`);
+    const signature = await wallet.signTypedData({
+      account,
+      domain: { name, version, chainId: baseSepolia.id, verifyingContract: a.tokenOrigin! },
+      types: { ReceiveWithAuthorization: [
+        { name: "from", type: "address" }, { name: "to", type: "address" }, { name: "value", type: "uint256" },
+        { name: "validAfter", type: "uint256" }, { name: "validBefore", type: "uint256" }, { name: "nonce", type: "bytes32" },
+      ] },
+      primaryType: "ReceiveWithAuthorization",
+      message: { from: account, to: a.escrow!, value: need, validAfter: 0n, validBefore, nonce },
     });
-    const rcpt = await pub.waitForTransactionReceipt({ hash, pollingInterval: 250 });
-    const ev = parseEventLogs({ abi: ESCROW_ABI, logs: rcpt.logs, eventName: "Opened" })[0];
-    await track((ev.args as { orderId: Hex }).orderId, "Your order, live on testnet", true);
+    done.push(li("sign", `Signed: ${Number(need) / 1e6} USDC on Base Sepolia → ${(Number(need) * 0.999) / 1e6} USDC to you on Unichain Sepolia`));
+
+    let orderId: Hex;
+    if (relayer) {
+      show("3/3", "Relaying your signed order (the demo service pays the gas) …");
+      const r = await post<{ orderId: Hex; openTx: Hex }>("/relay", {
+        order: Object.fromEntries(Object.entries(order).map(([k, v]) => [k, typeof v === "bigint" ? v.toString() : v])),
+        user: account, validAfter: "0", validBefore: validBefore.toString(), signature,
+      });
+      if (r.error) throw new Error(r.error);
+      orderId = r.orderId;
+    } else {
+      show("3/3", "Open the order (one transaction) …");
+      const hash = await wallet.writeContract({ account, address: a.escrow!, abi: ESCROW_ABI, functionName: "openFor", chain: baseSepolia, args: [order, account, 0n, validBefore, signature] });
+      const rcpt = await pub.waitForTransactionReceipt({ hash, pollingInterval: 250 });
+      orderId = (parseEventLogs({ abi: ESCROW_ABI, logs: rcpt.logs, eventName: "Opened" })[0].args as { orderId: Hex }).orderId;
+    }
+    await track(orderId, "Your order, live on testnet", true);
   } catch (e) {
     const msg = (e as { shortMessage?: string; message?: string }).shortMessage ?? (e as Error).message ?? "cancelled";
-    deps.steps(`<li data-on="true"><span class="verify__t">stopped</span><span>${msg.split("\n")[0]}</span></li>`);
+    deps.steps(done.join("") + li("stopped", esc(msg.split("\n")[0])));
   }
 }
 

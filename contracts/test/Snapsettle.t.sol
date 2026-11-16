@@ -391,6 +391,71 @@ contract SnapsettleTest is SnapsettleHarness {
         assertEq(uint8(_status(b)), uint8(OriginEscrow.Status.Settled));
     }
 
+    // ------------------------------------------------------------ cost
+
+    /// @dev Logs the real network would turn into reactive transactions: those matching a subscription.
+    function _reactiveTxs(Vm.Log[] memory logs, uint256 chainId) internal view returns (uint256 n) {
+        for (uint256 i = 0; i < logs.length; ++i) {
+            if (logs[i].topics.length == 0) continue;
+            if (sys.isSubscribed(address(rc), chainId, logs[i].emitter, uint256(logs[i].topics[0]))) ++n;
+        }
+    }
+
+    /// @dev Runs the pending callbacks and counts the reactive transactions their own logs would trigger.
+    function _callbacksTxs() internal returns (uint256) {
+        vm.chainId(ORIGIN);
+        vm.recordLogs();
+        _runCallbacks();
+        return _reactiveTxs(vm.getRecordedLogs(), ORIGIN);
+    }
+
+    /// @notice Reactive transactions per order, the unit the reactive contract pays for: 2 on sight
+    ///         (Opened, Filled), 3 delayed (+ Confirmed), 2 for a refund (Opened, RefundRequested). The callbacks'
+    ///         own events (Settled, Refunded) trigger none.
+    function test_reactiveTxsPerOrder() public {
+        // on sight
+        (bytes32 a, OrderData memory da, Vm.Log[] memory openA) = _openNoDeliver(50e6);
+        uint256 n = _reactiveTxs(openA, ORIGIN);
+        _deliver(openA, ORIGIN, address(escrow));
+        Vm.Log[] memory fillA = _fillNoDeliver(a, da);
+        n += _reactiveTxs(fillA, DEST);
+        _deliver(fillA, DEST, address(dest));
+        n += _callbacksTxs();
+        assertEq(n, 2, "on sight: 2 reactive transactions");
+        assertEq(uint8(_status(a)), uint8(OriginEscrow.Status.Settled));
+
+        // delayed (30 s tier)
+        (bytes32 b, OrderData memory db, Vm.Log[] memory openB) = _openNoDeliver(1_000e6);
+        n = _reactiveTxs(openB, ORIGIN);
+        _deliver(openB, ORIGIN, address(escrow));
+        Vm.Log[] memory fillB = _fillNoDeliver(b, db);
+        n += _reactiveTxs(fillB, DEST);
+        _deliver(fillB, DEST, address(dest));
+        vm.warp(block.timestamp + 30);
+        Vm.Log[] memory confB = _confirmNoDeliver(b, db);
+        n += _reactiveTxs(confB, DEST);
+        _deliver(confB, DEST, address(dest));
+        n += _callbacksTxs();
+        assertEq(n, 3, "delayed: 3 reactive transactions");
+        assertEq(uint8(_status(b)), uint8(OriginEscrow.Status.Settled));
+
+        // unfilled, refunded
+        (bytes32 c, OrderData memory dc, Vm.Log[] memory openC) = _openNoDeliver(50e6);
+        n = _reactiveTxs(openC, ORIGIN);
+        _deliver(openC, ORIGIN, address(escrow));
+        vm.warp(uint256(dc.fillDeadline) + GRACE + 1);
+        vm.chainId(ORIGIN);
+        vm.recordLogs();
+        vm.prank(user);
+        escrow.requestRefund(c);
+        Vm.Log[] memory rr = vm.getRecordedLogs();
+        n += _reactiveTxs(rr, ORIGIN);
+        _deliver(rr, ORIGIN, address(escrow));
+        n += _callbacksTxs();
+        assertEq(n, 2, "refund: 2 reactive transactions");
+        assertEq(uint8(_status(c)), uint8(OriginEscrow.Status.Refunded));
+    }
+
     function _requestRefund(bytes32 id) internal {
         vm.chainId(ORIGIN);
         vm.recordLogs();

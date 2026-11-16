@@ -1,0 +1,104 @@
+{
+  "env": "live",
+  "tier": 0,
+  "tierDelay": 0,
+  "tierPolicy": [
+    {
+      "maxAmount": "500000",
+      "delay": 0
+    },
+    {
+      "maxAmount": "2000000",
+      "delay": 30
+    },
+    {
+      "maxAmount": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+      "delay": 300
+    }
+  ],
+  "contracts": {
+    "escrow": "0xA6F93A883e188bCE11C3c039586BC798D17c3267",
+    "reactive": "0xA6F93A883e188bCE11C3c039586BC798D17c3267",
+    "destinationSettler": "0xD9f2d6c285eb24152A2007cAd959cFD2376A4822"
+  },
+  "amount": "250000",
+  "params": {
+    "requested": 52,
+    "concurrency": 3,
+    "gapMs": 1500
+  },
+  "n": 52,
+  "ok": 52,
+  "summary": {
+    "fillToSettle_ms": {
+      "n": 52,
+      "min": 1339,
+      "p50": 4566,
+      "p95": 6061,
+      "max": 7274
+    },
+    "full_ms": {
+      "n": 52,
+      "min": 3469,
+      "p50": 7075,
+      "p95": 8902,
+      "max": 9551
+    },
+    "fullBase_ms": {
+      "n": 52,
+      "min": 2000,
+      "p50": 2800,
+      "p95": 3800,
+      "max": 5200
+    },
+    "openToFill_ms": {
+      "n": 52,
+      "min": 82,
+      "p50": 715,
+      "p95": 1488,
+      "max": 1559
+    },
+    "fillToReact_ms": {
+      "n": 52,
+      "min": 1274,
+      "p50": 3316,
+      "p95": 5942,
+      "max": 6198
+    },
+    "reactToSettle_ms": {
+      "n": 52,
+      "min": -3611,
+      "p50": 1719,
+      "p95": 2132,
+      "max": 4057
+    },
+    "fillToSettle_s": {
+      "n": 52,
+      "min": 1,
+      "p50": 1,
+      "p95": 2,
+      "max": 4
+    },
+    "full_s": {
+      "n": 52,
+      "min": 2,
+      "p50": 3,
+      "p95": 4,
+      "max": 6
+    },
+    "fillToReact_s": {
+      "n": 52,
+      "min": -1,
+      "p50": -1,
+      "p95": 0,
+      "max": 0
+    },
+    "reactToSettle_s": {
+      "n": 52,
+      "min": 2,
+      "p50": 2,
+      "p95": 2,
+      "max": 4
+    }
+  }
+}

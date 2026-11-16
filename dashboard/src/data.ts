@@ -1,6 +1,6 @@
 // Data layer: deployment config and bench evidence (static JSON built by scripts/build-data.mjs) plus live
 // reads of the three chains through public RPCs. No DOM here; the page subscribes to changes.
-import { createPublicClient, http, parseAbiItem, type Address, type Hex, type PublicClient } from "viem";
+import { createPublicClient, fallback, http, parseAbiItem, type Address, type Hex, type PublicClient } from "viem";
 
 export type Env = "live" | "local";
 export type ChainKey = "origin" | "dest" | "lasna";
@@ -16,7 +16,7 @@ export type Config = {
 };
 export type Stat = { n: number; min: number; p50: number; p95: number; max: number };
 export type Loop = { i: number; orderId: Hex; ok: boolean; seg: Record<string, number | null>; tx: Record<string, Hex | undefined>; settleSeenBy?: string };
-export type Run = { run: string; env: Env; tier: number; tierDelay?: number; amount: string; n: number; ok: number; note?: string; deployment?: "current" | "previous"; summary: Record<string, Stat>; loops: Loop[] };
+export type Run = { run: string; env: Env; tier: number; tierDelay?: number; amount: string; n: number; ok: number; note?: string; deployment?: "current" | "previous"; solverBuild?: string | null; latestSolver?: boolean; summary: Record<string, Stat>; loops: Loop[] };
 export type Negative = { run: string; name: string; pass: boolean; detail: string; deployment?: "current" | "previous"; tx: Record<string, string | undefined> };
 export type Refund = { orderId: Hex; amount: string; openTx: Hex; requestTx: Hex; refundTx?: Hex };
 export type Evidence = { env: Env; runs: Run[]; negatives: Negative[]; refunds?: Refund[] };
@@ -84,6 +84,9 @@ class Store {
   evidence: Evidence = { env: "live", runs: [], negatives: [] };
   tiers: Tier[] = [];
   heads: Partial<Record<ChainKey, { block: bigint; ts: number; ok: boolean }>> = {};
+  /** The reactive contract's lREACT balance on Lasna. Settlement stops silently if it runs out, so it is shown. */
+  fuel: { wei: bigint; at: number } | null = null;
+  private fuelTimer = 0;
   readonly chainRows = new Map<string, Row>();
   private clients: Record<ChainKey, PublicClient> | null = null;
   private cursors: Partial<Record<ChainKey, bigint>> = {};
@@ -121,8 +124,24 @@ class Store {
     this.config = (await loadJson<Config>(`${DATA}/config.${this.env}.json`))!;
     this.evidence = (await loadJson<Evidence>(`${DATA}/evidence.${this.env}.json`)) ?? { env: this.env, runs: [], negatives: [] };
     this.pooledCache.clear();
-    const mk = (url: string) => createPublicClient({ transport: http(url, { batch: { batchSize: 20, wait: 50 }, retryCount: 4, retryDelay: 600 }) }) as PublicClient;
-    this.clients = { origin: mk(this.config.rpc.origin), dest: mk(this.config.rpc.dest), lasna: mk(this.config.rpc.lasna) };
+    // Fail fast and fall back: a public RPC that rate-limits must cost one short poll, not minutes of retries.
+    // Live chains get a second public endpoint; a poll that fails is simply retried on the next tick.
+    const BACKUP: Partial<Record<ChainKey, string>> = this.env === "live"
+      ? { origin: "https://base-sepolia-rpc.publicnode.com", dest: "https://unichain-sepolia-rpc.publicnode.com" }
+      : {};
+    const one = (url: string) => http(url, { batch: { batchSize: 20, wait: 50 }, retryCount: 1, retryDelay: 300, timeout: 6_000 });
+    const mk = (k: ChainKey, url: string) =>
+      createPublicClient({ transport: BACKUP[k] ? fallback([one(url), one(BACKUP[k]!)]) : one(url) }) as PublicClient;
+    this.clients = { origin: mk("origin", this.config.rpc.origin), dest: mk("dest", this.config.rpc.dest), lasna: mk("lasna", this.config.rpc.lasna) };
+    // Fuel on its own timer, from page load: it should not wait for the first (slow) history poll.
+    if (this.fuelTimer) clearInterval(this.fuelTimer);
+    this.fuel = null;
+    const reactive = this.config.addresses.reactive;
+    if (reactive) {
+      const readFuel = () => void this.clients!.lasna.getBalance({ address: reactive }).then((wei) => { this.fuel = { wei, at: Date.now() }; this.emit("heads"); }).catch(() => undefined);
+      readFuel();
+      this.fuelTimer = window.setInterval(readFuel, 30_000);
+    }
     this.tiers = [];
     if (this.config.addresses.reactive) {
       try {
@@ -147,7 +166,11 @@ class Store {
   latestRun(tier: number): Run | undefined {
     if (this.pooledCache.has(tier)) return this.pooledCache.get(tier);
     // Only runs on the current contracts: earlier deployments stay in the evidence, not in the headline numbers.
-    const runs = this.evidence.runs.filter((r) => r.tier === tier && r.ok > 0 && r.deployment !== "previous").sort((a, b) => a.run.localeCompare(b.run));
+    const onContracts = this.evidence.runs.filter((r) => r.tier === tier && r.ok > 0 && r.deployment !== "previous");
+    // The whole loop includes our solver's reaction, so runs from the current solver build stand for the tier
+    // whenever there are any; older builds stay in the evidence and in JUDGE.md's optimisation table.
+    const latest = onContracts.filter((r) => r.latestSolver);
+    const runs = (latest.length ? latest : onContracts).sort((a, b) => a.run.localeCompare(b.run));
     let out: Run | undefined;
     if (runs.length) {
       const loops = runs.flatMap((r) => r.loops);
@@ -284,9 +307,12 @@ class Store {
   }
 
   private first = true;
+  private pollStarted = 0;
   async poll() {
-    if (!this.clients || this.polling) return;
+    // Watchdog: a poll still running after 25 s is abandoned for scheduling purposes, so the page never freezes.
+    if (!this.clients || (this.polling && Date.now() - this.pollStarted < 25_000)) return;
     this.polling = true;
+    this.pollStarted = Date.now();
     const a = this.config.addresses;
     const settled: Hex[] = [];
     const opened: Hex[] = [];

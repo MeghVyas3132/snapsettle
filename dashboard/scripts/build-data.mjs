@@ -56,16 +56,30 @@ for (const env of envs) {
   const evDir = join(root, "evidence", env);
   const runs = [];
   const negatives = [];
+  // Same correction as JUDGE.md: open → fill from the solver's own fill receipt (the bench used to read the later
+  // confirm line for delayed orders). loops.jsonl stays as recorded.
+  const fillsFile = join(evDir, "solver", "fills.jsonl");
+  const fillReceipt = new Map(existsSync(fillsFile) ? readFileSync(fillsFile, "utf8").trim().split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((r) => r?.fillTx && r.minedSeenAtMs).map((r) => [r.orderId.toLowerCase(), r.minedSeenAtMs]) : []);
+  // Solver builds by start time: a run belongs to the build that was live when it started.
+  const buildsFile = join(evDir, "solver", "builds.json");
+  const builds = existsSync(buildsFile) ? readJson(buildsFile).map((b) => ({ ...b, t: Date.parse(b.from) })).sort((a, b) => a.t - b.t) : [];
+  const runTime = (d) => Date.parse(d.replace(/^bench-tier\d-/, "").replace(/T(\d\d)-(\d\d)-(\d\d)-(\d{3})Z$/, "T$1:$2:$3.$4Z"));
+  const buildOf = (d) => builds.filter((b) => b.t <= runTime(d)).pop()?.build ?? null;
+  const latestBuild = builds.at(-1)?.build ?? null;
   if (existsSync(evDir)) {
     for (const d of readdirSync(evDir).sort()) {
       const sum = join(evDir, d, "summary.json");
       if (d.startsWith("bench-") && existsSync(sum)) {
         const s = readJson(sum);
         const loops = readFileSync(join(evDir, d, "loops.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+        for (const l of loops) {
+          const filled = fillReceipt.get(String(l.orderId).toLowerCase());
+          if (l.ok && filled !== undefined && l.seenAtMs?.open !== undefined) l.seg.openToFill_ms = filled - l.seenAtMs.open;
+        }
         // Which deployment produced this run: the current one (matching escrow) or an earlier one.
         const current = (config.addresses.escrow ?? "").toLowerCase();
         const deployment = s.contracts?.escrow?.toLowerCase() === current ? "current" : "previous";
-        runs.push({ run: d, ...s, deployment, loops: loops.map((r) => ({ i: r.i, orderId: r.orderId, ok: r.ok, seg: r.seg, tx: r.tx, settleSeenBy: r.settleSeenBy })) });
+        runs.push({ run: d, ...s, deployment, solverBuild: buildOf(d), latestSolver: buildOf(d) === latestBuild, loops: loops.map((r) => ({ i: r.i, orderId: r.orderId, ok: r.ok, seg: r.seg, tx: r.tx, settleSeenBy: r.settleSeenBy })) });
       }
       const cases = join(evDir, d, "cases.jsonl");
       if (d.startsWith("negative-") && existsSync(cases)) {

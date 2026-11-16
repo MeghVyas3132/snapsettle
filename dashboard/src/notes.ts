@@ -68,7 +68,12 @@ function measure(n: Note) {
   n.h = n.el.offsetHeight;
   n.el.style.visibility = v;
 }
-addEventListener("resize", () => notes.forEach(measure));
+// The hero headline's right edge: hero labels stay right of it so they never cross the claim.
+let heroRight = 0;
+const measureHero = () => { const h = document.querySelector(".hero__h"); heroRight = h ? h.getBoundingClientRect().right : 0; };
+addEventListener("resize", () => { notes.forEach(measure); measureHero(); });
+document.fonts?.ready.then(measureHero);
+setTimeout(measureHero, 0);
 document.fonts?.ready.then(() => notes.forEach(measure));
 
 function hide(n: Note) {
@@ -100,7 +105,7 @@ export function layoutNotes(scene: ClockScene) {
     const w = n.w;
     const h = n.h;
     // In the chapters the left column holds the text: labels stay right of it.
-    const minLeft = !narrow && n.group !== "hero" ? innerWidth * 0.43 : 12;
+    const minLeft = narrow ? 12 : n.group === "hero" ? Math.max(12, heroRight + 32) : innerWidth * 0.43;
     const left = Math.max(minLeft, Math.min(innerWidth - w - 12, n.dx < 0 ? lx - w : lx));
     let top = Math.max(64, Math.min(innerHeight - h - 16, ly - h / 2));
     // Labels never sit on each other: one that would overlap an earlier label this frame moves below it.

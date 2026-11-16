@@ -246,7 +246,21 @@ function toggleRow(id: string) {
 
 // ---------------------------------------------------------------- top bar and close
 
+/** The reactive contract's balance, and how many orders it still covers at the measured ~0.045 lREACT each. */
+function renderFuel() {
+  const el = $("hero-fuel");
+  const f = store.fuel;
+  if (!f || store.env !== "live") return void (el.hidden = true);
+  const lreact = Number(f.wei) / 1e18;
+  const orders = Math.floor(lreact / 0.045);
+  const html = `Reactive contract fuel on Lasna: <b>${lreact.toFixed(1)} lREACT</b>, about ${orders.toLocaleString("en-US")} more orders at the measured ~0.045 lREACT each · ${link("lasna", "address", store.config.addresses.reactive, "balance")}`;
+  if (el.innerHTML !== html) el.innerHTML = html;
+  el.hidden = false;
+  el.dataset.low = String(orders < 50);
+}
+
 function renderHeads() {
+  renderFuel();
   const names = { origin: "Base", dest: "Unichain", lasna: "Lasna" } as const;
   const host = $("heads");
   if (!host.children.length) {

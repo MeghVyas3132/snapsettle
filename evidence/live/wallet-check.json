@@ -1,20 +1,16 @@
 {
-  "at": "2026-11-16T13:27:19.297Z",
+  "at": "2026-11-16T20:21:22.147Z",
   "env": "live",
-  "url": "https://meghvyas3132.github.io/snapsettle/",
+  "url": "http://localhost:5198/?debug",
   "wallet": "0x72028569Be3dB46659C8CDFe2EF56361a42cd977",
   "txsSignedByWallet": [
-    "0x8bd4344ad33afd240a3606d65e61f930a61251fa8c86605b2a4932f78ef9c808"
+    "signature"
   ],
   "settled": true,
-  "seconds": 126,
-  "orderId": "0x401e…5a82",
-  "panel": "LIVE ON TESTNET Your order, live on testnet Close +0 s Opened on Base Sepolia 0x8bd4…c808 +3 s Filled on Unichain Sepolia 0xb4ac…bbc7 ≈+3 s Seen and checked on Lasna 0x47cc…a695 +3.8 s Solver repaid on Base Sepolia 0x0207…9026 Order 0x401e…5a82: fill → solver repaid <1 s on the chains' own block clocks (1 s resolution); open → repaid 3.8 s. Live on testnet, not a replay.",
+  "seconds": 36,
+  "orderId": "0x70c7…403f",
+  "panel": "LIVE ON TESTNET Your order, live on testnet Close +0 s Opened on Base Sepolia 0x51db…f2e4 +1.4 s Filled on Unichain Sepolia 0x1f77…6d7f ≈+1.4 s Seen and checked on Lasna 0x2b30…46fc +2.6 s Solver repaid on Base Sepolia 0x6d21…03d1 Order 0x70c7…403f: fill → solver repaid 1.2 s on the chains' own block clocks (1 s resolution); open → repaid 2.6 s. Live on testnet, not a replay.",
   "pageErrors": [
-    "warning: [.WebGL-0x13c0084e600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
-    "warning: [.WebGL-0x13c0084e600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
-    "warning: [.WebGL-0x13c0084e600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
-    "warning: [.WebGL-0x13c0084e600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)",
-    "warning: poll dest failed: RPC Request failed."
+    "warning: [.WebGL-0x11c0084d400]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels"
   ]
 }

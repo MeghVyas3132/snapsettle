@@ -2,7 +2,7 @@
 // order it asks the resolver (eth_call) for the standard order description, vets the named assumptions
 // against its whitelist, builds the fill call from the resolved step, and executes it from its own inventory.
 // Repayment arrives on the origin chain when Reactive observes the fill.
-import { decodeFunctionData, encodeAbiParameters, hexToBigInt, maxUint256, size, slice, toFunctionSelector, type Address, type Hex } from "viem";
+import { createPublicClient, decodeFunctionData, encodeAbiParameters, hexToBigInt, maxUint256, size, slice, toFunctionSelector, webSocket, type Address, type Hex } from "viem";
 import { ENV, chains, pub, addr, abi, wallet, ORDER_TUPLE, evidenceDir, appendJsonl, sleep, now, blockTs, type OrderData } from "./common.ts";
 
 const solverDest = wallet("solver", "dest");
@@ -47,6 +47,22 @@ function refuse(o: OrderData): string | null {
   return null;
 }
 
+// Nonce kept locally: fetched once, incremented per send, re-read only after a send fails. Asking the RPC for the
+// nonce before every fill cost a round trip to Unichain on the hot path.
+let nonce = -1;
+async function syncNonce() {
+  nonce = await pub.dest.getTransactionCount({ address: solverAddr, blockTag: "pending" });
+}
+async function sendDest(to: Address, data: Hex, gas: bigint): Promise<Hex> {
+  const n = nonce++;
+  try {
+    return await solverDest.sendTransaction({ to, data, chain: chains.dest, account: solverDest.account!, gas, nonce: n, ...fees });
+  } catch (e) {
+    await syncNonce().catch(() => undefined); // the counter may be off (a dropped or external transaction)
+    throw e;
+  }
+}
+
 // A fill uses ~88k gas on Unichain Sepolia; a fixed cap skips eth_estimateGas on the hot path.
 const FILL_GAS = 160_000n;
 // Fees are refreshed in the background so a fill never waits on fee lookups.
@@ -57,7 +73,7 @@ async function refreshFees() {
   fees = { maxFeePerGas: f.maxFeePerGas * 2n, maxPriorityFeePerGas: f.maxPriorityFeePerGas };
 }
 
-async function fillOrder(orderId: Hex, order: OrderData, seenAt: number) {
+async function fillOrder(orderId: Hex, order: OrderData, seenAt: number, seenVia: string) {
   const resolved = (await pub.origin.readContract({
     address: addr.resolver, abi: abi.resolver, functionName: "resolve",
     args: [encodeAbiParameters([{ type: "bytes32" }, ORDER_TUPLE], [orderId, order])],
@@ -88,7 +104,7 @@ async function fillOrder(orderId: Hex, order: OrderData, seenAt: number) {
   // One round trip: gas, fees and nonce are already known, so viem only signs and sends.
   let hash: Hex;
   try {
-    hash = await solverDest.sendTransaction({ to: target.address, data, chain: chains.dest, account: solverDest.account!, gas: FILL_GAS, ...fees });
+    hash = await sendDest(target.address, data, FILL_GAS);
   } catch (e) { reserved -= order.outputAmount; throw e; }
   const sentAt = now();
   const r = await pub.dest.waitForTransactionReceipt({ hash, pollingInterval: 100 }).finally(() => {
@@ -97,7 +113,7 @@ async function fillOrder(orderId: Hex, order: OrderData, seenAt: number) {
   });
   const minedAt = now(); // the solver's own receipt time: the most precise wall-clock fill time we have
   const fillTs = await blockTs(pub.dest, r.blockNumber).catch(() => undefined);
-  appendJsonl(log, { orderId, status: r.status, fillTx: hash, fillBlock: r.blockNumber, fillBlockTs: fillTs, seenAtMs: seenAt, sentAtMs: sentAt, minedSeenAtMs: minedAt });
+  appendJsonl(log, { orderId, status: r.status, fillTx: hash, fillBlock: r.blockNumber, fillBlockTs: fillTs, seenAtMs: seenAt, seenVia, sentAtMs: sentAt, minedSeenAtMs: minedAt });
   console.log(`filled ${orderId.slice(0, 10)} ${r.status} ${hash}`);
   // Delayed tiers: the resolver adds a second step (confirm). Run it as soon as it simulates cleanly, i.e. once
   // the tier's delay has passed. Its arguments are all constants, so no variables to fill in.
@@ -118,7 +134,7 @@ async function runLaterStep(orderId: Hex, stepData: Hex) {
   while (now() < deadline) {
     try {
       await pub.dest.call({ to: target.address, data, account: solverAddr });
-      const hash = await solverDest.sendTransaction({ to: target.address, data, chain: chains.dest, account: solverDest.account!, gas: 120_000n, ...fees });
+      const hash = await sendDest(target.address, data, 120_000n);
       const r = await pub.dest.waitForTransactionReceipt({ hash, pollingInterval: 200 });
       appendJsonl(log, { orderId, step: "confirm", status: r.status, tx: hash, at: new Date().toISOString() });
       console.log(`confirmed ${orderId.slice(0, 10)} ${r.status} ${hash}`);
@@ -151,12 +167,36 @@ async function main() {
   if (balance === 0n) console.warn(`solver ${solverAddr} holds no USDC on Unichain Sepolia: it will refuse every order until it does (https://faucet.circle.com).`);
   setInterval(() => void refreshFees().catch(() => undefined), 5_000);
   setInterval(() => void refreshBalance().catch(() => undefined), 5_000);
-  // Prime the nonce manager so the first fill does not pay for a nonce lookup.
-  await pub.dest.getTransactionCount({ address: solverAddr, blockTag: "pending" });
+  await syncNonce();
   console.log(`solver (${ENV}) ${solverAddr}, repay to ${repayTo}; parallel fills, fixed gas, cached fees`);
   let from = await pub.origin.getBlockNumber();
   let head = from;
   const seen = new Set<Hex>();
+  // One entry point for every new order, however it was seen; the first path to see an order fills it.
+  const consider = (orderId: Hex, order: OrderData, via: string) => {
+    if (seen.has(orderId)) return;
+    seen.add(orderId);
+    if (process.env.SOLVER_SKIP_ABOVE && order.inputAmount > BigInt(process.env.SOLVER_SKIP_ABOVE)) return;
+    const early = refuse(order);
+    if (early) { appendJsonl(skipLog, { orderId, reason: early, outputAmount: order.outputAmount.toString(), at: new Date().toISOString() }); console.log(`refused ${orderId.slice(0, 10)}: ${early}`); return; }
+    // Every order fills at once, in parallel: no queue behind a slower one.
+    const seenAt = now();
+    fillOrder(orderId, order, seenAt, via).catch((e) => console.error(`skip ${orderId.slice(0, 10)}: ${(e as Error).message.split("\n")[0]}`));
+  };
+
+  // Fast path: providers push new Opened logs over WebSocket, so the solver hears of an order as soon as its block
+  // propagates instead of on its next poll (publicnode supports log subscriptions; drpc does not). The HTTP poll
+  // below stays as the fallback and catches anything a dropped socket missed. BASE_SEPOLIA_WS takes a comma list.
+  const WS = (process.env.BASE_SEPOLIA_WS ?? (ENV === "live" ? "wss://base-sepolia-rpc.publicnode.com" : "")).split(",").filter(Boolean);
+  for (const url of WS) {
+    const host = new URL(url).host;
+    const ws = createPublicClient({ chain: chains.origin, transport: webSocket(url, { reconnect: true, keepAlive: true }) });
+    ws.watchContractEvent({
+      address: addr.escrow, abi: abi.escrow, eventName: "Opened",
+      onLogs: (logs) => { for (const l of logs) { const a = (l as unknown as { args: { orderId: Hex; order: OrderData } }).args; consider(a.orderId, a.order, `ws:${host}`); } },
+      onError: (e) => console.error(`ws ${host}: ${e.message.split("\n")[0]}`),
+    });
+  }
   // The chain head is tracked in the background, so the hot loop stays one call and never asks for a range the
   // RPC refuses (Base Sepolia's public RPC rejects getLogs over 200 blocks).
   setInterval(() => void pub.origin.getBlockNumber().then((h) => { if (h > head) head = h; }).catch(() => undefined), 1000);
@@ -168,14 +208,7 @@ async function main() {
     const logs = await pub.origin.getContractEvents({ address: addr.escrow, abi: abi.escrow, eventName: "Opened", fromBlock: from + 1n, toBlock: to });
     for (const l of logs) {
       const a = l.args as { orderId: Hex; order: OrderData };
-      if (seen.has(a.orderId)) continue;
-      seen.add(a.orderId);
-      if (process.env.SOLVER_SKIP_ABOVE && a.order.inputAmount > BigInt(process.env.SOLVER_SKIP_ABOVE)) continue;
-      const early = refuse(a.order);
-      if (early) { appendJsonl(skipLog, { orderId: a.orderId, reason: early, outputAmount: a.order.outputAmount.toString(), at: new Date().toISOString() }); console.log(`refused ${a.orderId.slice(0, 10)}: ${early}`); continue; }
-      // Every order fills at once, in parallel: no queue behind a slower one.
-      const seenAt = now();
-      fillOrder(a.orderId, a.order, seenAt).catch((e) => console.error(`skip ${a.orderId.slice(0, 10)}: ${(e as Error).message.split("\n")[0]}`));
+      consider(a.orderId, a.order, "poll");
     }
     // Re-scan the last few blocks next time: a load-balanced RPC can report a head its log index has not reached.
     const next = to > 10n ? to - 10n : 0n;

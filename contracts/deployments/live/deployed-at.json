@@ -1,8 +1,10 @@
 {
-  "current": "v3",
+  "current": "v4",
   "v2": "2026-11-15T23:36:54Z",
   "v1Addresses": "contracts/deployments/live-v1/",
-  "note": "v3 adds a fixed token pair (Circle USDC Base Sepolia -> Unichain Sepolia) and a 0.1 USDC minimum to OriginEscrow.open, so spam in other tokens or dust reverts before an event exists. v2 added confirm-on-destination (no cron) and the outflow cap. Earlier evidence stays in evidence/live/, labelled by escrow address.",
+  "note": "v4 adds gasless openFor (one EIP-3009 signature bound to the order; a relayer pays gas and cannot change terms). DestinationSettler is reused from v3. v3 added the fixed token pair and the 0.1 USDC minimum; v2 added confirm-on-destination and the outflow cap.",
   "v3": "2026-11-16T13:12:38Z",
-  "v2Addresses": "contracts/deployments/live-v2/"
+  "v2Addresses": "contracts/deployments/live-v2/",
+  "v4": "2026-11-16T20:02:20Z",
+  "v3Addresses": "contracts/deployments/live-v3/"
 }
