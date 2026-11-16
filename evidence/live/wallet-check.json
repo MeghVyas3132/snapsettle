@@ -1,19 +1,20 @@
 {
-  "at": "2026-11-16T13:24:15.180Z",
+  "at": "2026-11-16T13:27:19.297Z",
   "env": "live",
-  "url": "http://localhost:5198/",
+  "url": "https://meghvyas3132.github.io/snapsettle/",
   "wallet": "0x72028569Be3dB46659C8CDFe2EF56361a42cd977",
   "txsSignedByWallet": [
-    "0xbe425c12bced85e72f4565aebd3108e7b64b3e08fad9f122ee4d7eeffba9c851"
+    "0x8bd4344ad33afd240a3606d65e61f930a61251fa8c86605b2a4932f78ef9c808"
   ],
   "settled": true,
-  "seconds": 96,
-  "orderId": "0x8836…c603",
-  "panel": "LIVE ON TESTNET Your order, live on testnet Close +0 s Opened on Base Sepolia 0xbe42…c851 +3.8 s Filled on Unichain Sepolia 0x8bdd…9964 +3.8 s Seen and checked on Lasna 0x9149…b0a0 +5.4 s Solver repaid on Base Sepolia 0x9261…2ab9 Order 0x8836…c603: fill → solver repaid 1.6 s on the chains' own block clocks (1 s resolution); open → repaid 5.4 s. Live on testnet, not a replay.",
+  "seconds": 126,
+  "orderId": "0x401e…5a82",
+  "panel": "LIVE ON TESTNET Your order, live on testnet Close +0 s Opened on Base Sepolia 0x8bd4…c808 +3 s Filled on Unichain Sepolia 0xb4ac…bbc7 ≈+3 s Seen and checked on Lasna 0x47cc…a695 +3.8 s Solver repaid on Base Sepolia 0x0207…9026 Order 0x401e…5a82: fill → solver repaid <1 s on the chains' own block clocks (1 s resolution); open → repaid 3.8 s. Live on testnet, not a replay.",
   "pageErrors": [
-    "warning: [.WebGL-0x12400852800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
-    "warning: [.WebGL-0x12400852800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
-    "warning: [.WebGL-0x12400852800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
-    "warning: [.WebGL-0x12400852800]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)"
+    "warning: [.WebGL-0x13c0084e600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "warning: [.WebGL-0x13c0084e600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "warning: [.WebGL-0x13c0084e600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels",
+    "warning: [.WebGL-0x13c0084e600]GL Driver Message (OpenGL, Performance, GL_CLOSE_PATH_NV, High): GPU stall due to ReadPixels (this message will no longer repeat)",
+    "warning: poll dest failed: RPC Request failed."
   ]
 }

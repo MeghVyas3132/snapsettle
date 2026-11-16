@@ -5,7 +5,8 @@ Deadline 5 Dec 2026 20:00 UTC. Target submission **1 Dec**.
 ## Status (update at the end of every session)
 
 - 2026-11-15: repo created; contracts and 23 Foundry tests; v1 deployed live (delayed tiers drained on Cron10).
-- 2026-11-16: v2 deployed and verified on Sourcify: delayed tiers settle only from `Confirmed` (the solver's `confirm` re-reads the fill on Unichain), no cron, 500 USDC/hour outflow cap; 34 tests. Live evidence on v2: 52 loops per tier, 5 refusal cases passing, reorg check 0 of 1,578 transactions changed, 3 orders stranded by a solver bug refunded. `JUDGE.md` generated; site live on GitHub Pages. **Next: record the video, keep the solver funded, then submit.**
+- 2026-11-16: v2 deployed and verified on Sourcify: delayed tiers settle only from `Confirmed` (the solver's `confirm` re-reads the fill on Unichain), no cron, 500 USDC/hour outflow cap; 34 tests. Live evidence on v2: 52 loops per tier, 5 refusal cases passing, reorg check 0 of 1,578 transactions changed, 3 orders stranded by a solver bug refunded. `JUDGE.md` generated; site live on GitHub Pages. 
+- 2026-11-16: pressure test of the judge path. Fixed: solver now refuses bad terms and orders beyond its inventory (a hostile order is refused live); the site showed no time for a visitor's settled order (race) and lost events when one RPC failed; phone layout. v3 deployed: `open()` takes one USDC route and a 0.1 USDC minimum, so spam reverts before an event. v3 evidence: 52/52 per tier, 6 refusal cases, reorg check 0 of 2,046 changed. **Next: record the video, keep the solver funded, then submit.**
 
 ## Schedule
 
