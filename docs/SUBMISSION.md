@@ -10,7 +10,7 @@ Numbers are from the current (v3) contracts, `evidence/live/`, as regenerated in
 
 **Repository:** https://github.com/MeghVyas3132/snapsettle (judge path at the top of the README, all evidence in `JUDGE.md`)
 
-**Live site:** https://meghvyas3132.github.io/snapsettle/ (open your own order from a wallet, or replay a recorded one)
+**Live site:** https://snapsettle.aexiz.in/ (open your own order from a wallet, or replay a recorded one)
 
 **Demo video:** «link» («m:ss», captions burned in)
 

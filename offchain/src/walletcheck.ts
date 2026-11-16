@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { Hex } from "viem";
 import { ENV, ROOT, chains, pub, wallet } from "./common.ts";
 
-const url = process.argv[2] ?? "https://meghvyas3132.github.io/snapsettle/";
+const url = process.argv[2] ?? "https://snapsettle.aexiz.in/";
 const w = wallet("user", "origin");
 const me = w.account!.address;
 const sent: string[] = [];

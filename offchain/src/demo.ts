@@ -2,7 +2,7 @@
 // and on request from the dashboard ("Run one live order"), so anyone watching sees a real loop settle.
 // Run it next to the solver (`pnpm solver`). Live testnets only. Keys come from offchain/.env, never printed.
 //
-//   SNAP_ENV=live DEMO_INTERVAL_S=900 DEMO_PORT=8787 DEMO_ORIGINS=https://meghvyas3132.github.io pnpm demo
+//   SNAP_ENV=live DEMO_INTERVAL_S=900 DEMO_PORT=8787 DEMO_ORIGINS=https://snapsettle.aexiz.in pnpm demo
 //
 // HTTP:
 //   GET  /status  → { env, address, lastOrder, nextHeartbeatInS, todayCount, cap }

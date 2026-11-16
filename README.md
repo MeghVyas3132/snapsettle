@@ -13,7 +13,7 @@ Built for the Reactive Omni Buildathon, track **Every Second Counts**.
 | Transactions showing the full loop, origin event → reactive transaction → callback | [JUDGE.md §2](JUDGE.md#2-full-loops-joined), and every loop in [`evidence/live/loops-current.csv`](evidence/live/loops-current.csv) |
 | Full-loop latency and how it was measured | [JUDGE.md §3](JUDGE.md#3-latency-on-the-current-contracts-four-clocks): four clocks, each with its bias stated |
 | What failed | [JUDGE.md §5](JUDGE.md#5-everything-that-went-wrong-nothing-excluded): nothing excluded |
-| Live site | https://meghvyas3132.github.io/snapsettle/: open your own order from a wallet and watch it settle, or replay a recorded one (labelled as a replay) |
+| Live site | https://snapsettle.aexiz.in/: open your own order from a wallet and watch it settle, or replay a recorded one (labelled as a replay) |
 
 `JUDGE.md` is generated from the contracts and `evidence/live/` by `offchain/src/judge.ts`; no number in it is typed by hand.
 
