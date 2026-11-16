@@ -116,6 +116,7 @@ html { scrollbar-color: var(--ink-3) var(--fog); scrollbar-width: thin; }
 .ch__aside { color: var(--ink-2); font-size: 15px; }
 .ch__src { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-top: 14px; }
 
+.hero__plain { font-size: clamp(15px, 1.15vw, 17px); line-height: 1.5; color: var(--ink-2); max-width: 36ch; margin-bottom: clamp(14px, 2.2vh, 22px); }
 .hero__h { font-size: clamp(40px, 5vw, 80px); line-height: 0.98; letter-spacing: -0.035em; max-width: 11ch; }
 .hero__l1, .hero__l2 { display: block; }
 .hero__l2 { color: var(--ink-2); font-size: 0.5em; letter-spacing: -0.02em; line-height: 1.1; margin-top: 0.35em; max-width: 22ch; }
