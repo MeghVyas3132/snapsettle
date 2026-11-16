@@ -207,7 +207,9 @@ async function main() {
       res.setHeader("Access-Control-Allow-Headers", "content-type");
       return send(req, res, 204, {});
     }
-    const ip = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "?").split(",")[0].trim();
+    // Behind Cloudflare (proxied DNS), the visitor's address arrives in CF-Connecting-IP; Caddy's X-Forwarded-For
+    // would only show Cloudflare. Per-visitor limits use the first one present.
+    const ip = String(req.headers["cf-connecting-ip"] ?? req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "?").split(",")[0].trim();
     if (req.method === "GET" && req.url === "/status") {
       return send(req, res, 200, { env: ENV, address: userAddr, amount: amount.toString(), lastOrder, nextHeartbeatInS: Math.max(0, Math.round((nextBeat - Date.now()) / 1000)), todayCount: day.count, cap: DAILY_CAP, ...(await health()) });
     }

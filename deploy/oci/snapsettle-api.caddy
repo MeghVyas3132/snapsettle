@@ -1,6 +1,7 @@
 # Snapsettle demo/relay API on api.snapsettle.aexiz.in. Testnet only.
 #
-# Load this file only after the DNS record resolves to this server (A api.snapsettle -> 140.238.167.7, DNS only):
+# Load this file only after the DNS record resolves (A api.snapsettle -> 140.238.167.7, proxied through Cloudflare
+# like d2c, so the origin address stays hidden):
 # Caddy orders a certificate the moment it sees the block, and failed authorisations count toward Let's Encrypt's
 # limit of five per hostname per hour.
 #
@@ -16,7 +17,6 @@ api.snapsettle.aexiz.in {
 	request_body {
 		max_size 8KB
 	}
-	reverse_proxy snapsettle-demo-1:8787 {
-		header_up X-Forwarded-For {remote_host}
-	}
+	# The service reads the visitor's address from Cloudflare's CF-Connecting-IP header for its rate limits.
+	reverse_proxy snapsettle-demo-1:8787
 }
