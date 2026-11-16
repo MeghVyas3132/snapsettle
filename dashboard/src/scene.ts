@@ -445,7 +445,7 @@ export class ClockScene {
       g.fillRect(1022, 420, 4, 160);
       g.textAlign = "left";
       g.font = '500 24px "Martian Mono Variable", monospace';
-      g.fillText("2H CHALLENGE WINDOW · DOCS.ACROSS.TO", 84, 660);
+      g.fillText("ACROSS · 30 MIN CHALLENGE · HUBPOOL LIVENESS 1800", 84, 660);
       g.textAlign = "right";
       g.fillText("REACTIVE NETWORK · LASNA 5318007", 1964, 660);
     });

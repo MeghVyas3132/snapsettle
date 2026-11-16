@@ -16,8 +16,8 @@ export type Config = {
 };
 export type Stat = { n: number; min: number; p50: number; p95: number; max: number };
 export type Loop = { i: number; orderId: Hex; ok: boolean; seg: Record<string, number | null>; tx: Record<string, Hex | undefined>; settleSeenBy?: string };
-export type Run = { run: string; env: Env; tier: number; tierDelay?: number; amount: string; n: number; ok: number; note?: string; summary: Record<string, Stat>; loops: Loop[] };
-export type Negative = { run: string; name: string; pass: boolean; detail: string; tx: Record<string, string | undefined> };
+export type Run = { run: string; env: Env; tier: number; tierDelay?: number; amount: string; n: number; ok: number; note?: string; deployment?: "current" | "previous"; summary: Record<string, Stat>; loops: Loop[] };
+export type Negative = { run: string; name: string; pass: boolean; detail: string; deployment?: "current" | "previous"; tx: Record<string, string | undefined> };
 export type Refund = { orderId: Hex; amount: string; openTx: Hex; requestTx: Hex; refundTx?: Hex };
 export type Evidence = { env: Env; runs: Run[]; negatives: Negative[]; refunds?: Refund[] };
 export type Tier = { maxAmount: bigint; delay: number };
@@ -146,7 +146,8 @@ class Store {
    */
   latestRun(tier: number): Run | undefined {
     if (this.pooledCache.has(tier)) return this.pooledCache.get(tier);
-    const runs = this.evidence.runs.filter((r) => r.tier === tier && r.ok > 0).sort((a, b) => a.run.localeCompare(b.run));
+    // Only runs on the current contracts: earlier deployments stay in the evidence, not in the headline numbers.
+    const runs = this.evidence.runs.filter((r) => r.tier === tier && r.ok > 0 && r.deployment !== "previous").sort((a, b) => a.run.localeCompare(b.run));
     let out: Run | undefined;
     if (runs.length) {
       const loops = runs.flatMap((r) => r.loops);
@@ -167,7 +168,7 @@ class Store {
 
   /** The newest single run of a tier: for legs that depend on the solver's version (open → fill, whole loop). */
   newestRun(tier: number): Run | undefined {
-    return this.evidence.runs.filter((r) => r.tier === tier && r.ok > 0 && !r.note).sort((a, b) => a.run.localeCompare(b.run)).pop();
+    return this.evidence.runs.filter((r) => r.tier === tier && r.ok > 0 && !r.note && r.deployment !== "previous").sort((a, b) => a.run.localeCompare(b.run)).pop();
   }
 
   tierOf(amount: bigint | null): number | null {

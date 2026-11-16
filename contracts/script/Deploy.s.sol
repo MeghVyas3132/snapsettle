@@ -52,8 +52,12 @@ abstract contract Base is Script {
 contract DeployDestination is Base {
     function run() external {
         require(block.chainid == UNICHAIN_SEPOLIA, "run on Unichain Sepolia");
+        DestinationSettler.Tier[] memory t = new DestinationSettler.Tier[](3);
+        t[0] = DestinationSettler.Tier(_t0Max(), _d(0));
+        t[1] = DestinationSettler.Tier(_t1Max(), _d(1));
+        t[2] = DestinationSettler.Tier(type(uint256).max, _d(2));
         vm.startBroadcast();
-        DestinationSettler dest = new DestinationSettler();
+        DestinationSettler dest = new DestinationSettler(t);
         vm.stopBroadcast();
         _write("1-destination", "destinationSettler", address(dest));
     }
@@ -87,10 +91,13 @@ contract DeployOrigin is Base {
         address rc = _read("2-reactive", "snapsettleReactive");
         uint32 grace = uint32(vm.envOr("REFUND_GRACE", uint256(60)));
         uint256 fund = vm.envOr("ESCROW_FUND", uint256(0.01 ether));
+        // Outflow cap: most USDC (6 decimals) released to solvers per window. Testnet default 500 USDC / hour.
+        uint256 cap = vm.envOr("OUTFLOW_CAP", uint256(500_000_000));
+        uint256 window = vm.envOr("OUTFLOW_WINDOW", uint256(3600));
 
         vm.startBroadcast();
         OriginEscrow escrow = new OriginEscrow{value: fund}(
-            IPayable(payable(BASE_SEPOLIA_CALLBACK_PROXY)), rc, grace, UNICHAIN_SEPOLIA, dest
+            IPayable(payable(BASE_SEPOLIA_CALLBACK_PROXY)), rc, grace, UNICHAIN_SEPOLIA, dest, cap, window
         );
         vm.stopBroadcast();
         _write("3-origin", "originEscrow", address(escrow));

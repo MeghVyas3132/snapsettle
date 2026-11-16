@@ -1,76 +1,125 @@
 # Snapsettle
 
-**Cross-chain intents settled by Reactive.** A user opens an order on Base Sepolia, a solver fills it on Unichain Sepolia from its own inventory, and a Reactive contract on Lasna checks the fill against the order and repays the solver on Base, seconds after the fill. No optimistic challenge window, no attester, no keeper.
+**Intent settlement where Reactive is the verifier.** A user opens an order on Base Sepolia. A solver fills it on Unichain Sepolia from its own inventory. A Reactive contract on Lasna sees the order on one chain and the fill on the other, a pairing no contract on either chain can make, and calls back to Base to repay the solver out of the escrow.
 
 Built for the Reactive Omni Buildathon, track **Every Second Counts**.
 
-## Judge path (5 minutes)
+## For judges
 
-1. **Dashboard:** https://meghvyas3132.github.io/snapsettle/ shows the chess-clock duel (Across's 2 h window against our measured repay time), per-leg p50/p95 for each finality tier, every loop as a scoresheet row with its four transactions, and the failure cases refused on-chain.
-2. **[JUDGE.md](JUDGE.md):** deployed addresses and one full loop as explorer links, origin event → Reactive transaction → callback.
-3. **The claim, measured:** `evidence/live/` holds bench runs (50+ loops per tier, every tx hash) and negative cases.
-4. **The why:** [docs/05-finality-policy.md](docs/05-finality-policy.md) answers the question Reactive's own post *Intents, Solvers, and Borrowed Certainty* ends on.
-5. **The code:** [`contracts/src/SnapsettleReactive.sol`](contracts/src/SnapsettleReactive.sol) is where Reactive does the work.
+| What the rules ask for | Where |
+|---|---|
+| Public repo | this repository |
+| Deployed contracts and network | [JUDGE.md §1](JUDGE.md#1-deployed-contracts-current-v2): Base Sepolia, Unichain Sepolia, Reactive Lasna; all four verified on Sourcify |
+| Transactions showing the full loop, origin event → reactive transaction → callback | [JUDGE.md §2](JUDGE.md#2-full-loops-joined), and every loop in [`evidence/live/loops-current.csv`](evidence/live/loops-current.csv) |
+| Full-loop latency and how it was measured | [JUDGE.md §3](JUDGE.md#3-latency-on-the-current-contracts-four-clocks): four clocks, each with its bias stated |
+| What failed | [JUDGE.md §5](JUDGE.md#5-everything-that-went-wrong-nothing-excluded): nothing excluded |
+| Live site | https://meghvyas3132.github.io/snapsettle/: open your own order from a wallet and watch it settle, or replay a recorded one (labelled as a replay) |
 
-## Why it needs Reactive
+`JUDGE.md` is generated from the contracts and `evidence/live/` by `offchain/src/judge.ts`; no number in it is typed by hand.
 
-The origin chain cannot see the destination chain. So today an intent protocol either trusts an attester or waits out an optimistic window. Across repays relayers after a challenge period of **2 hours by default** ([Across docs](https://docs.across.to/user-docs/how-across-works/speed)), and the relayer's fee has to cover that capital time ([Across](https://across.to/blog/The-Intents-bridge-How-Across-uses-optimistic-verification-to-lower-costs)).
+## The problem
 
-A reactive contract observes **both** chains. `SnapsettleReactive` sees `Opened` on Base and `Filled` on Unichain, compares the fill's terms hash with the order, checks the deadline, and requests the callback that releases the escrow. The check *is* the settlement. Without Reactive this project would need an oracle, a bridge message or a trusted relayer.
+In an intent bridge the solver pays the user on the destination chain from its own inventory and is repaid later from the user's escrow on the origin chain. The origin chain cannot see the destination fill, so every protocol needs a way to learn that the fill happened, and that way sets how long the solver's capital is tied up.
 
-## How it works
+Across, for example, repays relayers in bundles proposed every ~1.5 hours at minimum, each followed by a challenge period ([Across docs](https://docs.across.to/introduction/refunds)). The challenge period on the live HubPool is 30 minutes; check it in one line:
 
-```
-Base Sepolia                     Lasna (Reactive)                  Unichain Sepolia
-OriginEscrow.open() ──Opened──►  SnapsettleReactive               DestinationSettler.fill()
-                                  ◄─────────────────── Filled ─────  solver pays the user
-                                  terms hash ✓  deadline ✓
-                                  tier delay (0 / 30 s / 300 s)
-OriginEscrow.settle() ◄─callback─ requestCallbackV_1_0
-solver repaid
+```bash
+cast call 0xc186fA914353c44b2E33eBE05f21846F1048bEda "liveness()(uint32)" --rpc-url https://ethereum-rpc.publicnode.com
+# 1800
 ```
 
-- **Finality tiers.** Small orders settle the moment the fill is seen; larger ones wait 30 s or 300 s, drained on Cron10. Reactive's "origin finality" trade-off is made explicit per order ([docs/05](docs/05-finality-policy.md)).
-- **ERC-7683 resolver.** `SnapsettleResolver` implements the resolver-centric Draft. Any generic solver can read an order, fill it, and see `estimatedDelaySeconds` and the named assumptions `reactive-settlement` / `reactive-origin-finality`. Our solver bot uses only the resolver.
-- **Refunds.** An unfilled order refunds after its deadline plus 60 s; a refund request after a valid fill is ignored.
+(`HubPool.sol` declares a 7200 s default and older Across docs still say 2 hours; both predate a `setLiveness` call.) So an Across relayer is repaid roughly 30 minutes to 2 hours after its fill.
 
-Details: [docs/01-architecture.md](docs/01-architecture.md). Trust model and limits: [SECURITY.md](SECURITY.md).
+That window is not waste: it is the time in which a fraudulent bundle can be disputed. Any faster scheme replaces it with some other source of trust. Snapsettle's is stated below.
+
+## What Snapsettle does
+
+```
+Base Sepolia                      Lasna (Reactive)                       Unichain Sepolia
+OriginEscrow.open() ──Opened──►   SnapsettleReactive                    DestinationSettler.fill()
+                                   ◄──────────────────────── Filled ────  solver pays the user
+                                   terms hash ✓  deadline ✓
+                                   tier: on sight ──────────────► settle now
+                                   tier: 30 s / 300 s ─ wait ─┐
+                                   ◄──────────────────── Confirmed ────  confirm(): fill still in state,
+                                                              │           delay passed (solver sends it)
+OriginEscrow.settle() ◄─callback── requestCallbackV_1_0 ◄─────┘
+solver repaid (capped per hour)
+```
+
+- **The check is the settlement.** `SnapsettleReactive` compares the fill's terms hash with the order it saw opened and checks the deadline. A wrong-terms fill is rejected; a late fill reverts on Unichain.
+- **Finality is chosen per order.** Reactive treats an observed event as canonical even if that chain later reorganises. Small orders accept that and settle on sight. Larger orders wait 30 s or 300 s, and then settle only from `Confirmed`, which `DestinationSettler.confirm()` emits when the delay has passed **and** the fill is still in Unichain's state. A fill removed by a reorg during the wait cannot be confirmed, so nobody is paid for it, and the user can get a refund.
+- **Who acts.** For on-sight orders, nobody does after the fill: Reactive's network observes and calls back. For delayed orders the solver sends one `confirm` transaction on Unichain; that transaction is what re-reads the destination state. There is no cron.
+- **Blast radius.** `OriginEscrow` releases at most 500 USDC per hour through the Reactive path (testnet setting). If Reactive were faulty or compromised, that bounds what it could pay out before the fast path stops; anything over the cap is deferred and released when the window has room.
+- **ERC-7683.** `SnapsettleResolver` implements the resolver-centric draft. A generic solver gets the fill step, the confirm step for delayed orders, the payment with `estimatedDelaySeconds` (the order's tier delay plus measured loop latency) and two named assumptions, `reactive-settlement` and `reactive-origin-finality`. Our solver bot uses only what the resolver returns.
+
+## The trade, stated plainly
+
+Snapsettle replaces Across's dispute window with trust in Reactive's validators reading two chains' logs correctly (CometBFT, safe while fewer than a third misbehave; today its sequencer is not decentralised). The finality tiers are where that trade is made explicit: per order and by value, instead of once for every order. Reactive's post [*Intents, Solvers, and Borrowed Certainty*](https://blog.reactive.network/intents-solvers-and-borrowed-certainty/) calls origin finality a deliberate trade and closes by asking: "should that be a per-protocol choice, or the next thing somebody tries to standardize?" Snapsettle is one per-order answer, published through ERC-7683's own fields.
+
+## How much faster, honestly
+
+The advantage depends on the tier, because the tiers deliberately add delay where more value is at risk. Capital tied up in repayment is roughly daily volume × delay; at an illustrative $10M/day that is $116 per second of delay.
+
+| Repayment after the fill | Capital waiting at $10M/day | vs Across (30 min to 2 h) |
+|---|---|---|
+| On sight, ~2 s (small orders) | ~$230 | ~900–3,600× less |
+| 30 s tier + confirm | ~$3,500–4,000 | ~50–200× less |
+| 300 s tier + confirm (large orders) | ~$35,000 | ~6–24× less |
+| Across: 30 min challenge, after a bundle of up to ~1.5 h | $208,000–833,000 | — |
+
+Volumes are an illustration, not a measurement. Measured times per tier are in [JUDGE.md §3](JUDGE.md#3-latency-on-the-current-contracts-four-clocks). Testnet tier thresholds are tiny (0.5 / 2 USDC) so the bench can run on faucet funds; on mainnet they would be set by value at risk.
+
+## Prior art, and what is new
+
+| | Who confirms the fill | Who must send a transaction | Repayment delay | How the delay is published |
+|---|---|---|---|---|
+| Across | UMA optimistic oracle over bundles | a bundle proposer | ~30 min to 2 h | protocol-wide |
+| Relay | Relay's own oracle, credited on Relay's hub | Relay | per order, no figure published | protocol-wide |
+| Open Intents Framework (Hyperlane, Wormhole, storage proofs, …) | a pluggable oracle | someone submits the attestation | depends on the oracle | its `AcrossResolver.sol` publishes a constant 2 h through `estimatedDelaySeconds` |
+| deBridge DLN | deBridge cross-chain message | the solver | not published | — |
+| **Snapsettle** | **Reactive, reading both chains' logs** | **nobody (on sight) · the solver's `confirm` (delayed)** | **~2 s · 30 s · 300 s by value** | **per order, through `estimatedDelaySeconds` and named assumptions** |
+
+What is new is narrow, and we state it that way: an ERC-7683 settlement whose attestation needs no application-level actor for small orders, with a value-tiered repayment delay, published per order, where existing resolvers publish a constant. "No actor" is a property every Reactive application shares; the contribution is applying it to intent settlement and making the finality trade per order. We found no other Reactive-based intent settlement, in this buildathon or on GitHub.
+
+## Why Reactive
+
+The core check needs two events on two chains: `Opened` on Base and `Filled` (or `Confirmed`) on Unichain. A contract on either chain cannot see the other. An off-chain bot could, and could be faster, but it would then be a trusted operator (Relay's model). Reactive makes the observer a network and the callback a protocol transaction, so the escrow trusts one reactive contract address on Lasna instead of a company's key.
+
+## Run it
+
+```bash
+# contracts: 34 tests, including fuzzing, a reorg case and the outflow cap
+cd contracts && forge test
+
+# your own solver against the live contracts, in three commands
+cd offchain && pnpm install
+cp .env.example .env    # add a funded Unichain Sepolia key as SOLVER_PRIVATE_KEY
+SNAP_ENV=live pnpm solver
+
+# local three-chain harness (anvil + an emulated relay; not Reactive Network latency)
+./scripts/local-up.sh
+SNAP_ENV=local pnpm relay:local & SNAP_ENV=local pnpm solver & SNAP_ENV=local pnpm bench --tier 1 --n 3
+
+# evidence
+SNAP_ENV=live pnpm bench --tier 0 --n 50     # writes evidence/live/bench-*
+SNAP_ENV=live pnpm negative                  # refusal cases (pause other solvers first)
+SNAP_ENV=live pnpm judge                     # regenerates JUDGE.md and the CSV
+```
 
 ## Repository
 
 | Path | What |
 |---|---|
-| `contracts/` | Foundry: `OriginEscrow`, `DestinationSettler`, `SnapsettleReactive`, `SnapsettleResolver`; 28 tests incl. fuzz and a gas cap |
-| `offchain/` | viem/TypeScript: generic ERC-7683 solver, loop bench, negative-case runner, local Reactive relay (local harness only) |
-| `dashboard/` | Static dashboard (Vite + viem), deployed to GitHub Pages |
-| `scripts/local-up.sh` | Three anvil chains with the real chain IDs plus an emulated relay, for development |
-| `evidence/live/` | Live bench and negative-case runs |
-| `docs/` | Context, architecture, deploy, plan, decisions, finality policy |
+| `contracts/` | Foundry: `OriginEscrow`, `DestinationSettler`, `SnapsettleReactive`, `SnapsettleResolver`, tests |
+| `offchain/` | viem/TypeScript: generic ERC-7683 solver, bench, refusal cases, demo service, recovery, reorg check, JUDGE.md generator |
+| `dashboard/` | The site (Vite, Three.js, viem), deployed to GitHub Pages |
+| `evidence/live/` | Every bench run, refusal run, refund and the reorg check, as recorded |
+| `docs/` | Architecture, finality policy, mainnet path, deploy notes, decisions log |
 
-## Run it
+## Limits
 
-```bash
-# contracts
-cd contracts && forge test
-
-# local three-chain harness (anvil), relay, solver, bench
-./scripts/local-up.sh
-cd offchain && pnpm install
-SNAP_ENV=local pnpm relay:local &      # LOCAL emulation of Reactive
-SNAP_ENV=local pnpm solver &
-SNAP_ENV=local pnpm bench --tier 0 --n 5
-
-# live testnets: deploy per docs/03-deploy.md, then
-SNAP_ENV=live pnpm solver &
-SNAP_ENV=live pnpm bench --tier 0 --n 50
-
-# dashboard
-cd dashboard && pnpm install && pnpm dev   # add ?env=local for the harness
-```
-
-## Honest limits
-
-Testnet only, not audited. The solver is our own bot; there is no live solver market on testnet. The Across window is quoted from its docs, not measured here. A destination reorg deeper than an order's tier would still pay the solver. See [SECURITY.md](SECURITY.md).
+Testnet only and not audited. Every actor in the evidence is ours: the user wallet, the solver and the demo service. The on-sight tier still trusts what Reactive observed; its protection is the size cap and the hourly outflow cap. Reactive's mainnet support for this architecture with Base and Unichain is not confirmed yet ([docs/06-mainnet-path.md](docs/06-mainnet-path.md)). More in [SECURITY.md](SECURITY.md).
 
 ## License
 

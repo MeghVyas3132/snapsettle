@@ -22,9 +22,9 @@ abstract contract SnapsettleHarness is Test {
     uint256 constant DEST = 1301; // Unichain Sepolia
     uint256 constant REACTIVE = 5318007; // Lasna
     address constant SYSTEM = 0x8888888888888888888888888888888888888888;
-    address constant CRON_SOURCE = 0x0000000000000000000000000000000000fffFfF;
-    uint256 constant CRON10_TOPIC_0 = 0x04463f7c1651e6b9774d7f85c85bb94654e3c46ca79b0c16fb16d4183307b687;
     uint32 constant GRACE = 600;
+    uint256 constant CAP = 100_000e6; // outflow cap per window
+    uint256 constant WINDOW = 1 hours;
 
     MockSystem sys;
     TestToken usdcOrigin;
@@ -49,7 +49,11 @@ abstract contract SnapsettleHarness is Test {
 
         vm.chainId(DEST);
         usdcDest = new TestToken("TEST USDC", "tUSDC");
-        dest = new DestinationSettler();
+        DestinationSettler.Tier[] memory dt = new DestinationSettler.Tier[](3);
+        dt[0] = DestinationSettler.Tier(100e6, 0);
+        dt[1] = DestinationSettler.Tier(10_000e6, 30);
+        dt[2] = DestinationSettler.Tier(type(uint256).max, 300);
+        dest = new DestinationSettler(dt);
 
         vm.chainId(REACTIVE);
         SnapsettleReactive.Tier[] memory t = new SnapsettleReactive.Tier[](3);
@@ -60,7 +64,7 @@ abstract contract SnapsettleHarness is Test {
 
         vm.chainId(ORIGIN);
         usdcOrigin = new TestToken("TEST USDC", "tUSDC");
-        escrow = new OriginEscrow(IPayable(payable(proxy)), address(rc), GRACE, DEST, address(dest));
+        escrow = new OriginEscrow(IPayable(payable(proxy)), address(rc), GRACE, DEST, address(dest), CAP, WINDOW);
 
         vm.prank(owner);
         rc.setOriginEscrow(address(escrow));
@@ -150,14 +154,17 @@ abstract contract SnapsettleHarness is Test {
         vm.chainId(saved);
     }
 
-    function _cronTick() internal {
-        IReactive.LogRecord memory r;
-        r.chainId = REACTIVE;
-        r.contractAddress = CRON_SOURCE;
-        r.topic0 = CRON10_TOPIC_0;
-        r.data = abi.encode(block.number);
-        r.opCode = 2;
-        _react(r);
+    /// @dev The solver's second step for delayed tiers: confirm on the destination, then deliver `Confirmed`.
+    function _confirmNoDeliver(bytes32 id, OrderData memory d) internal returns (Vm.Log[] memory logs) {
+        vm.chainId(DEST);
+        vm.recordLogs();
+        vm.prank(solver);
+        dest.confirm(id, d);
+        logs = vm.getRecordedLogs();
+    }
+
+    function _confirm(bytes32 id, OrderData memory d) internal {
+        _deliver(_confirmNoDeliver(id, d), DEST, address(dest));
     }
 
     /// @dev Replays pending callbacks the way the proxy delivers them: as `proxy`, with the requesting

@@ -23,7 +23,7 @@ Snapsettle settles cross-chain intents with Reactive Network. A user opens an or
 
 ## Positioning
 
-The origin chain cannot see the destination fill, so today protocols wait out an optimistic window (Across: 2 h by default, per its docs) or trust an attester. Here Reactive observes the fill directly and is the check. A per-order finality tier makes Reactive's "origin finality" trade-off explicit, answering the open question in Reactive's own post "Intents, Solvers, and Borrowed Certainty" (3 Sep 2026).
+The origin chain cannot see the destination fill, so today protocols wait out an optimistic window (Across: bundles every ~1.5 h plus a 30-minute on-chain challenge period) or trust an attester. Here Reactive observes the fill directly and is the check. A per-order finality tier makes Reactive's "origin finality" trade-off explicit, answering the open question in Reactive's own post "Intents, Solvers, and Borrowed Certainty" (3 Sep 2026).
 
 ## Operating Context
 
@@ -44,7 +44,7 @@ Name: **Snapsettle**. No logo or palette exists. Must not imitate Reactive Netwo
 
 - Foundry suite (28 tests incl. fuzz), local bench and negative-case runs (LOCAL only, under `evidence/local/`, not committed).
 - Live evidence: none yet. Do not fabricate latency numbers, order counts or solver adoption.
-- Across 2 h default challenge period: https://docs.across.to/user-docs/how-across-works/speed
+- Across challenge period, on-chain: HubPool 0xc186fA914353c44b2E33eBE05f21846F1048bEda `liveness()` = 1800 s; bundles every ~1.5 h: https://docs.across.to/introduction/refunds
 
 ## Product Principles
 

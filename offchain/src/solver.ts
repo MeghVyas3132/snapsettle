@@ -2,7 +2,7 @@
 // order it asks the resolver (eth_call) for the standard order description, vets the named assumptions
 // against its whitelist, builds the fill call from the resolved step, and executes it from its own inventory.
 // Repayment arrives on the origin chain when Reactive observes the fill.
-import { decodeFunctionData, encodeAbiParameters, hexToBigInt, maxUint256, size, slice, type Address, type Hex } from "viem";
+import { decodeFunctionData, encodeAbiParameters, hexToBigInt, maxUint256, size, slice, toFunctionSelector, type Address, type Hex } from "viem";
 import { ENV, chains, pub, addr, abi, wallet, ORDER_TUPLE, evidenceDir, appendJsonl, sleep, now, blockTs, type OrderData } from "./common.ts";
 
 const solverDest = wallet("solver", "dest");
@@ -68,6 +68,37 @@ async function fillOrder(orderId: Hex, order: OrderData, seenAt: number) {
   const fillTs = await blockTs(pub.dest, r.blockNumber).catch(() => undefined);
   appendJsonl(log, { orderId, status: r.status, fillTx: hash, fillBlock: r.blockNumber, fillBlockTs: fillTs, seenAtMs: seenAt, sentAtMs: sentAt, minedSeenAtMs: minedAt });
   console.log(`filled ${orderId.slice(0, 10)} ${r.status} ${hash}`);
+  // Delayed tiers: the resolver adds a second step (confirm). Run it as soon as it simulates cleanly, i.e. once
+  // the tier's delay has passed. Its arguments are all constants, so no variables to fill in.
+  if (r.status === "success" && resolved.steps.length > 1) void runLaterStep(orderId, resolved.steps[1]);
+}
+
+// Errors after which retrying a later step is pointless (anything else, e.g. TooEarly, is retried).
+const FINAL_ERRORS = ["AlreadyConfirmed()", "NotFilled()", "NoDelayTier()"].map((sig) => toFunctionSelector(sig));
+
+async function runLaterStep(orderId: Hex, stepData: Hex) {
+  const step = decodeFunctionData({ abi: abi.step, data: stepData });
+  const [targetIa, selector, args] = step.args as [Hex, Hex, Hex[], Hex[]];
+  const target = parseInterop(targetIa);
+  if (target.chainId !== BigInt(chains.dest.id)) return;
+  let data: Hex = selector;
+  for (const a of args) data = (data + unframe(a).slice(2)) as Hex;
+  const deadline = now() + 30 * 60_000;
+  while (now() < deadline) {
+    try {
+      await pub.dest.call({ to: target.address, data, account: solverAddr });
+      const hash = await solverDest.sendTransaction({ to: target.address, data, chain: chains.dest, account: solverDest.account!, gas: 120_000n, ...fees });
+      const r = await pub.dest.waitForTransactionReceipt({ hash, pollingInterval: 200 });
+      appendJsonl(log, { orderId, step: "confirm", status: r.status, tx: hash, at: new Date().toISOString() });
+      console.log(`confirmed ${orderId.slice(0, 10)} ${r.status} ${hash}`);
+      return;
+    } catch (e) {
+      const msg = (e as Error).message;
+      // A raw eth_call revert carries the error selector, not its name.
+      if (FINAL_ERRORS.some((sel) => msg.includes(sel)) || /AlreadyConfirmed|NotFilled|NoDelayTier/.test(msg)) return;
+      await sleep(1500); // TooEarly: try again shortly
+    }
+  }
 }
 
 async function ensureAllowance() {
@@ -114,6 +145,8 @@ async function main() {
   for (;;) {
     await scan().catch(async (e) => {
       const msg = (e as Error).message.split("\n")[0];
+      // "from" past the head (no new block yet): some RPCs return [], others call it invalid. Nothing new either way.
+      if (/invalid param/i.test(msg)) return;
       // A range the RPC refuses means the cursor fell behind: jump it to the head and keep going.
       if (/limited to|range|413/i.test(msg)) {
         const h = await pub.origin.getBlockNumber().catch(() => from);

@@ -12,39 +12,34 @@ import {OrderData, OrderLib} from "./OrderTypes.sol";
 ///         terms hash matches the order and that landed before the deadline releases the escrow to the
 ///         solver through a callback. No optimistic challenge window and no off-chain keeper are involved.
 ///
-///         Finality policy: Reactive treats an observed origin event as canonical even if that chain later
+///         Finality policy: Reactive treats an observed event as canonical even if that chain later
 ///         reorganises ("origin finality"). Snapsettle makes that trade explicit per order. Small orders
-///         settle the moment the fill is seen; larger orders wait a configurable delay before the settle
-///         callback, giving the destination chain time to settle. Delayed settlements are drained on Cron10
-///         ticks, and the Cron10 subscription is only held while the queue is non-empty.
+///         settle the moment the fill is seen. Larger orders settle only from a `Confirmed` event, which the
+///         destination settler emits once the tier's delay has passed AND the fill is still in its state: a
+///         fill removed by a reorg during the wait cannot be confirmed. No cron runs while orders wait.
 contract SnapsettleReactive is AbstractReactive {
     // ---------------------------------------------------------------- constants
-
-    /// @dev Legacy system contract that still emits the protocol Cron events on Omni.
-    address internal constant CRON_SOURCE = 0x0000000000000000000000000000000000fffFfF;
-    /// @dev keccak256("Cron10(uint256)"): fires every 10 Reactive blocks.
-    uint256 internal constant CRON10_TOPIC_0 = 0x04463f7c1651e6b9774d7f85c85bb94654e3c46ca79b0c16fb16d4183307b687;
 
     uint256 internal constant OPENED_TOPIC_0 = uint256(
         keccak256("Opened(bytes32,address,(address,uint256,address,uint256,address,uint256,address,uint32))")
     );
     uint256 internal constant REFUND_REQUESTED_TOPIC_0 = uint256(keccak256("RefundRequested(bytes32,address)"));
     uint256 internal constant FILLED_TOPIC_0 = uint256(keccak256("Filled(bytes32,address,bytes32,address,uint32)"));
+    uint256 internal constant CONFIRMED_TOPIC_0 =
+        uint256(keccak256("Confirmed(bytes32,bytes32,address,uint32,uint32)"));
 
     /// @dev Covers OriginEscrow.settle/refund (one ERC-20 transfer) plus the proxy's own overhead.
     uint64 internal constant CALLBACK_GAS_LIMIT = 300_000;
-    /// @dev Upper bound on settlements requested per Cron tick. Reactive caps a reactive transaction at
-    ///      900k gas and the system contract keeps ~100k of it, so react() must stay well under ~800k.
-    ///      Measured against the mock system contract, each settle request costs ~190k (an upper bound:
-    ///      the mock stores every payload); 3 per tick keeps the worst case near 600k.
-    uint256 internal constant MAX_SETTLES_PER_TICK = 3;
+    /// @notice A delayed order whose fill is never confirmed (e.g. a reorg removed it) becomes refundable this
+    ///         long after it would have been ready, so the user's funds cannot be stranded. A day gives an honest solver ample time to confirm.
+    uint64 public constant CONFIRM_WINDOW = 1 days;
 
     // ---------------------------------------------------------------- types
 
     enum Status {
         None,
         Open,
-        Queued,
+        Queued, // fill accepted, waiting for `Confirmed`
         SettleRequested,
         RefundRequested
     }
@@ -83,8 +78,6 @@ contract SnapsettleReactive is AbstractReactive {
     /// @dev Fills observed before their `Opened` event, keyed by keccak256(orderId, orderHash) so a fill
     ///      with fake terms cannot occupy the slot of the genuine one.
     mapping(bytes32 key => PendingFill) public pendingFills;
-    bytes32[] public queue;
-    bool public cronActive;
 
     // ---------------------------------------------------------------- events
 
@@ -93,9 +86,9 @@ contract SnapsettleReactive is AbstractReactive {
     event FillAccepted(bytes32 indexed orderId, address repayTo, uint32 fillTime, uint32 settleDelay);
     event FillParked(bytes32 indexed orderId, bytes32 orderHash);
     event FillRejected(bytes32 indexed orderId, string reason);
+    event FillConfirmed(bytes32 indexed orderId, address repayTo);
     event SettlementRequested(bytes32 indexed orderId, address repayTo);
     event RefundCallbackRequested(bytes32 indexed orderId);
-    event CronSubscription(bool active);
 
     error NotOwner();
     error AlreadyConfigured();
@@ -129,6 +122,9 @@ contract SnapsettleReactive is AbstractReactive {
         SYSTEM.subscribe(
             destinationChainId_, destinationSettler_, FILLED_TOPIC_0, REACTIVE_IGNORE, REACTIVE_IGNORE, REACTIVE_IGNORE
         );
+        SYSTEM.subscribe(
+            destinationChainId_, destinationSettler_, CONFIRMED_TOPIC_0, REACTIVE_IGNORE, REACTIVE_IGNORE, REACTIVE_IGNORE
+        );
     }
 
     /// @notice One-time wiring of the origin escrow. The escrow is deployed after this contract because it
@@ -149,13 +145,9 @@ contract SnapsettleReactive is AbstractReactive {
         if (log.chainId == originChainId && log.contractAddress == originEscrow && originEscrow != address(0)) {
             if (log.topic0 == OPENED_TOPIC_0) _onOpened(log);
             else if (log.topic0 == REFUND_REQUESTED_TOPIC_0) _onRefundRequested(log);
-        } else if (
-            log.chainId == destinationChainId && log.contractAddress == destinationSettler
-                && log.topic0 == FILLED_TOPIC_0
-        ) {
-            _onFilled(log);
-        } else if (log.contractAddress == CRON_SOURCE && log.topic0 == CRON10_TOPIC_0) {
-            _drainQueue();
+        } else if (log.chainId == destinationChainId && log.contractAddress == destinationSettler) {
+            if (log.topic0 == FILLED_TOPIC_0) _onFilled(log);
+            else if (log.topic0 == CONFIRMED_TOPIC_0) _onConfirmed(log);
         }
         // Anything else falls through: reverting would still be billed.
     }
@@ -218,37 +210,55 @@ contract SnapsettleReactive is AbstractReactive {
         if (delay == 0) {
             _requestSettle(id);
         } else {
+            // Wait for the destination to confirm the fill is still there after the delay.
             o.status = Status.Queued;
-            o.readyAt = uint64(block.timestamp) + delay;
-            queue.push(id);
-            _setCron(true);
+            o.readyAt = uint64(fillTime) + delay;
         }
+    }
+
+    /// @dev `Confirmed` proves the fill exists in the destination's state after the delay. It settles a queued
+    ///      order, or an open one whose `Filled` was never observed. Payment goes to the confirmed fill's
+    ///      `repayTo`: if a reorg dropped one fill and another solver re-filled, the fill that still exists wins.
+    function _onConfirmed(LogRecord calldata log) internal {
+        bytes32 id = bytes32(log.topic1);
+        (bytes32 h, address repayTo, uint32 fillTime, uint32 confirmTime) =
+            abi.decode(log.data, (bytes32, address, uint32, uint32));
+        Order storage o = orders[id];
+        if (o.status != Status.Queued && o.status != Status.Open) {
+            emit FillRejected(id, "confirm for order not waiting");
+            return;
+        }
+        if (h != o.orderHash) {
+            emit FillRejected(id, "terms mismatch");
+            return;
+        }
+        if (fillTime > o.fillDeadline) {
+            emit FillRejected(id, "late fill");
+            return;
+        }
+        uint32 delay = settleDelay(o.inputAmount);
+        if (delay == 0 || uint256(confirmTime) < uint256(fillTime) + delay) {
+            emit FillRejected(id, "confirm before delay");
+            return;
+        }
+        o.repayTo = repayTo;
+        emit FillConfirmed(id, repayTo);
+        _requestSettle(id);
     }
 
     function _onRefundRequested(LogRecord calldata log) internal {
         bytes32 id = bytes32(log.topic1);
         Order storage o = orders[id];
-        // A fill seen in time wins: the solver gets paid and the refund request is ignored.
+        // A fill seen in time wins: the solver gets paid and the refund request is ignored. A queued fill that
+        // was never confirmed within CONFIRM_WINDOW of being ready (e.g. removed by a reorg) no longer blocks it.
+        if (o.status == Status.Queued && block.timestamp > o.readyAt + CONFIRM_WINDOW) {
+            o.status = Status.RefundRequested;
+            _requestRefund(id);
+            return;
+        }
         if (o.status != Status.Open) return;
         o.status = Status.RefundRequested;
         _requestRefund(id);
-    }
-
-    function _drainQueue() internal {
-        uint256 settled;
-        uint256 i;
-        while (i < queue.length && settled < MAX_SETTLES_PER_TICK) {
-            bytes32 id = queue[i];
-            if (orders[id].readyAt <= block.timestamp) {
-                queue[i] = queue[queue.length - 1];
-                queue.pop();
-                _requestSettle(id);
-                ++settled;
-            } else {
-                ++i;
-            }
-        }
-        if (queue.length == 0) _setCron(false);
     }
 
     // ---------------------------------------------------------------- callbacks
@@ -276,23 +286,11 @@ contract SnapsettleReactive is AbstractReactive {
         );
     }
 
-    function _setCron(bool on) internal {
-        if (cronActive == on) return;
-        cronActive = on;
-        if (on) {
-            SYSTEM.subscribe(block.chainid, CRON_SOURCE, CRON10_TOPIC_0, REACTIVE_IGNORE, REACTIVE_IGNORE, REACTIVE_IGNORE);
-        } else {
-            SYSTEM.unsubscribe(
-                block.chainid, CRON_SOURCE, CRON10_TOPIC_0, REACTIVE_IGNORE, REACTIVE_IGNORE, REACTIVE_IGNORE
-            );
-        }
-        emit CronSubscription(on);
-    }
-
     // ---------------------------------------------------------------- views & maintenance
 
     /// @notice Settlement delay, in seconds, for an order of `amount` input. This is the value a resolver
-    ///         surfaces to solvers as `estimatedDelaySeconds` (plus loop latency).
+    ///         surfaces to solvers as `estimatedDelaySeconds` (plus loop latency). Must match the destination
+    ///         settler's tiers, which enforce the same delay before `confirm`.
     function settleDelay(uint256 amount) public view returns (uint32) {
         uint256 n = _tiers.length;
         for (uint256 i = 0; i < n; ++i) {
@@ -303,10 +301,6 @@ contract SnapsettleReactive is AbstractReactive {
 
     function tiers() external view returns (Tier[] memory) {
         return _tiers;
-    }
-
-    function queueLength() external view returns (uint256) {
-        return queue.length;
     }
 
     /// @notice Re-sends a settle or refund callback that never landed (e.g. the escrow was briefly out of

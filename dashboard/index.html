@@ -35,8 +35,8 @@
     <main id="story" class="story">
       <section class="ch ch--hero" id="hero" aria-labelledby="hero-h">
         <h1 id="hero-h" class="hero__h">
-          <span class="hero__l1">Solver repaid in <span id="hero-p50">one second</span>.</span>
-          <span class="hero__l2">The window it replaces lasts two hours.</span>
+          <span class="hero__l1">Solver repaid <span id="hero-p50">about two seconds</span> after the fill.</span>
+          <span class="hero__l2">No contract on Base or Unichain can see both sides. Reactive can.</span>
         </h1>
         <div class="hero__foot">
           <p class="hero__src" id="hero-src">Reading the bench evidence…</p>
@@ -74,7 +74,7 @@
       <section class="ch" id="tiers" aria-labelledby="tiers-h">
         <div class="ch__text">
           <h2 id="tiers-h">Finality is a setting.</h2>
-          <p>Reactive acts on what it sees, even if a chain later reorganises. So each order carries its own policy: small ones settle on sight, larger ones wait. Solvers read the wait from our ERC-7683 resolver as <code>estimatedDelaySeconds</code>.</p>
+          <p>Reactive acts on what it sees, even if a chain later reorganises. So each order carries its own policy: small ones settle on sight; larger ones wait, then the solver's <code>confirm</code> re-reads the fill on Unichain before anything is paid. Solvers read the wait from our ERC-7683 resolver as <code>estimatedDelaySeconds</code>.</p>
           <div class="tiers" id="tier-list" role="list"></div>
         </div>
       </section>
@@ -90,6 +90,26 @@
 
       <section class="ch ch--rest" id="rest" aria-hidden="true"></section>
     </main>
+
+    <section class="prior" id="prior" aria-labelledby="prior-h">
+      <h2 id="prior-h">What is new, and what it costs.</h2>
+      <p class="prior__lede">Other intent protocols already repay solvers. What differs is who confirms the fill, who has to act, and how the wait is chosen.</p>
+      <div class="prior__scroll">
+        <table class="prior__table">
+          <thead><tr><th scope="col"></th><th scope="col">Who confirms the fill</th><th scope="col">Who must send a transaction</th><th scope="col">Solver repaid after the fill</th><th scope="col">How the wait is chosen</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Across</th><td>UMA optimistic oracle over bundles</td><td>a bundle proposer</td><td>~30 min to 2 h</td><td>one rule for every order</td></tr>
+            <tr><th scope="row">Relay</th><td>Relay's own oracle, credited on Relay's hub</td><td>Relay</td><td>per order; no figure published</td><td>one rule for every order</td></tr>
+            <tr><th scope="row">Open Intents Framework</th><td>a pluggable oracle: Hyperlane, Wormhole, storage proofs</td><td>someone submits the attestation</td><td>depends on the oracle</td><td>its reference <code>AcrossResolver</code> publishes a constant 2 h</td></tr>
+            <tr class="is-us"><th scope="row">Snapsettle</th><td>Reactive, reading both chains' logs</td><td>nobody for small orders · the solver's <code>confirm</code> for larger ones</td><td id="prior-ours">~2 s · 30 s · 300 s, by value</td><td>per order, published through ERC-7683</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="prior__cols">
+        <p><b>The trade.</b> Across's 30-minute window is not waste: it is when a bad bundle can be disputed. Snapsettle trusts Reactive's validators to read two chains correctly instead, and makes that trade per order: small orders settle on sight, larger ones wait and are re-checked on Unichain before any payout. The escrow caps what the Reactive path can release per hour.</p>
+        <p><b>Why Reactive.</b> The check needs an event on Base and an event on Unichain. A contract on either chain cannot see the other. A bot could, and could be faster, but it would be a trusted operator. Reactive makes the observer a network.</p>
+      </div>
+    </section>
 
     <section class="sheet" id="sheet" aria-labelledby="sheet-h">
       <div class="sheet__head">
@@ -118,7 +138,7 @@
     </section>
 
     <footer class="close" id="close">
-      <p class="close__line">Two hours, or one second.</p>
+      <p class="close__line">Every order chooses how much certainty it buys.</p>
       <div class="close__cols" id="close-cols"></div>
     </footer>
 

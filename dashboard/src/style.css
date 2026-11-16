@@ -236,6 +236,23 @@ html { scrollbar-color: var(--ink-3) var(--fog); scrollbar-width: thin; }
 .empty { color: var(--ink-2); }
 #sheet-more { margin-top: 22px; }
 
+/* ---------------------------------------------------------------- prior art */
+
+.prior { position: relative; z-index: 5; background: var(--fog-hi); padding: 12vh var(--gutter) 10vh; border-top: 1px solid var(--hair); }
+.prior h2 { font-size: clamp(32px, 3.6vw, 56px); line-height: 1.04; letter-spacing: -0.03em; max-width: 18ch; }
+.prior__lede { color: var(--ink-2); max-width: 60ch; margin-top: 16px; }
+.prior__scroll { overflow-x: auto; margin-top: 30px; border-top: 1px solid var(--ink); }
+.prior__table { width: 100%; border-collapse: collapse; min-width: 820px; font-size: 14.5px; }
+.prior__table th, .prior__table td { text-align: left; vertical-align: top; padding: 13px 14px 13px 0; border-bottom: 1px solid var(--hair); }
+.prior__table thead th { font-family: var(--mono); font-size: 10.5px; font-weight: 500; color: var(--ink-2); }
+.prior__table tbody th { font-weight: 500; white-space: nowrap; }
+.prior__table td { color: var(--ink-2); }
+.prior__table .is-us th, .prior__table .is-us td { color: var(--ink); font-weight: 500; }
+.prior__table .is-us th::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--signal); margin-right: 8px; vertical-align: 2px; }
+.prior__cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; margin-top: 34px; }
+.prior__cols p { font-size: 15.5px; color: var(--ink-2); }
+.prior__cols b { color: var(--ink); font-weight: 600; }
+
 /* ---------------------------------------------------------------- close */
 
 .close { position: relative; z-index: 5; background: var(--fog-hi); padding: 10vh var(--gutter) 8vh; border-top: 1px solid var(--hair); }
@@ -313,6 +330,7 @@ html { scrollbar-color: var(--ink-3) var(--fog); scrollbar-width: thin; }
   .cue { display: none; }
   .sheet__head { grid-template-columns: 1fr; }
   .close__cols { grid-template-columns: 1fr; }
+  .prior__cols { grid-template-columns: 1fr; }
   .detail__steps { grid-template-columns: 1fr 1fr; }
   .note { font-size: 10px; }
   .tape { font-size: 10px; }

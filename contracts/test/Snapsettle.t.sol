@@ -18,7 +18,7 @@ contract SnapsettleTest is SnapsettleHarness {
         assertTrue(sys.isSubscribed(address(rc), DEST, address(dest), uint256(DestinationSettler.Filled.selector)));
         assertTrue(sys.isSubscribed(address(rc), ORIGIN, address(escrow), uint256(OriginEscrow.Opened.selector)));
         assertTrue(sys.isSubscribed(address(rc), ORIGIN, address(escrow), uint256(OriginEscrow.RefundRequested.selector)));
-        assertFalse(sys.isSubscribed(address(rc), REACTIVE, CRON_SOURCE, CRON10_TOPIC_0), "cron off at rest");
+        assertTrue(sys.isSubscribed(address(rc), DEST, address(dest), uint256(DestinationSettler.Confirmed.selector)));
     }
 
     function test_setOriginEscrow_onlyOnceAndOnlyOwner() public {
@@ -53,25 +53,94 @@ contract SnapsettleTest is SnapsettleHarness {
         assertEq(uint8(_status(id)), uint8(OriginEscrow.Status.Settled));
     }
 
-    function test_mediumOrder_waitsForTierDelay() public {
+    function test_mediumOrder_settlesOnlyAfterConfirm() public {
         (bytes32 id, OrderData memory d) = _open(1_000e6);
         _fill(id, d);
         assertEq(sys.callbackCount(), 0, "no settle before the delay");
-        assertTrue(rc.cronActive());
-        assertTrue(sys.isSubscribed(address(rc), REACTIVE, CRON_SOURCE, CRON10_TOPIC_0), "cron subscribed");
+        assertEq(uint8(_rcStatus(id)), uint8(SnapsettleReactive.Status.Queued));
 
         vm.warp(block.timestamp + 29);
-        _cronTick();
-        assertEq(sys.callbackCount(), 0, "still waiting");
+        vm.chainId(DEST);
+        vm.prank(solver);
+        vm.expectRevert(abi.encodeWithSelector(DestinationSettler.TooEarly.selector, block.timestamp + 1));
+        dest.confirm(id, d);
 
         vm.warp(block.timestamp + 1);
-        _cronTick();
-        assertEq(sys.callbackCount(), 1, "settled after 30 s");
-        assertFalse(rc.cronActive(), "cron released when queue empties");
-        assertFalse(sys.isSubscribed(address(rc), REACTIVE, CRON_SOURCE, CRON10_TOPIC_0));
-
+        _confirm(id, d);
+        assertEq(sys.callbackCount(), 1, "settled from Confirmed after 30 s");
         _runCallbacks();
         assertEq(usdcOrigin.balanceOf(solverRepay), 1_000e6);
+    }
+
+    function test_confirm_onlyOnce_andNotForOnSightOrders() public {
+        (bytes32 id, OrderData memory d) = _open(1_000e6);
+        _fill(id, d);
+        vm.warp(block.timestamp + 30);
+        _confirm(id, d);
+        vm.chainId(DEST);
+        vm.expectRevert(DestinationSettler.AlreadyConfirmed.selector);
+        dest.confirm(id, d);
+
+        (bytes32 id2, OrderData memory d2) = _open(50e6);
+        _fill(id2, d2);
+        vm.chainId(DEST);
+        vm.expectRevert(DestinationSettler.NoDelayTier.selector);
+        dest.confirm(id2, d2);
+    }
+
+    /// @notice The reorg case: Reactive saw a fill that is no longer in the destination's state. It cannot be
+    ///         confirmed, nobody is paid for it, and the user can get a refund once the confirm window has passed.
+    function test_reorgedFill_cannotBeConfirmed_andBecomesRefundable() public {
+        (bytes32 id, OrderData memory d) = _open(1_000e6);
+        uint256 snap = vm.snapshotState();
+        Vm.Log[] memory fillLogs = _fillNoDeliver(id, d);
+        vm.revertToState(snap); // the fill is gone from every chain's state ...
+        _deliver(fillLogs, DEST, address(dest)); // ... but Reactive had already observed it
+        assertEq(uint8(_rcStatus(id)), uint8(SnapsettleReactive.Status.Queued));
+
+        vm.warp(block.timestamp + 30);
+        vm.chainId(DEST);
+        vm.expectRevert(DestinationSettler.NotFilled.selector);
+        dest.confirm(id, d);
+        assertEq(sys.callbackCount(), 0, "nobody paid for a fill that no longer exists");
+
+        // Within the confirm window the refund request is still ignored (the fill might be confirmed).
+        vm.warp(uint256(d.fillDeadline) + GRACE + 1);
+        _requestRefund(id);
+        assertEq(sys.callbackCount(), 0);
+
+        // After the confirm window the order is refundable.
+        vm.warp(block.timestamp + rc.CONFIRM_WINDOW() + 1);
+        _requestRefund(id);
+        assertEq(sys.callbackCount(), 1);
+        _runCallbacks();
+        assertEq(usdcOrigin.balanceOf(user), 1_000_000e6, "user made whole");
+    }
+
+    /// @notice If a reorg dropped the first fill and another solver fills again, the fill that exists is paid.
+    function test_refillAfterReorg_paysTheConfirmedFill() public {
+        (bytes32 id, OrderData memory d) = _open(1_000e6);
+        uint256 snap = vm.snapshotState();
+        Vm.Log[] memory first = _fillNoDeliver(id, d);
+        vm.revertToState(snap);
+        _deliver(first, DEST, address(dest)); // Reactive queued the vanished fill
+
+        address other = makeAddr("otherSolver");
+        address otherRepay = makeAddr("otherRepay");
+        usdcDest.mint(other, 10_000e6);
+        vm.chainId(DEST);
+        vm.prank(other);
+        usdcDest.approve(address(dest), type(uint256).max);
+        vm.recordLogs();
+        vm.prank(other);
+        dest.fill(id, d, otherRepay);
+        _deliver(vm.getRecordedLogs(), DEST, address(dest)); // rejected: order already queued
+
+        vm.warp(block.timestamp + 30);
+        _confirm(id, d); // confirms the fill that exists: the second one
+        _runCallbacks();
+        assertEq(usdcOrigin.balanceOf(otherRepay), 1_000e6, "the existing fill is paid");
+        assertEq(usdcOrigin.balanceOf(solverRepay), 0);
     }
 
     function test_fillObservedBeforeOpen_isParkedThenSettled() public {
@@ -84,52 +153,22 @@ contract SnapsettleTest is SnapsettleHarness {
         assertEq(usdcOrigin.balanceOf(solverRepay), 50e6);
     }
 
-    function test_drain_capsPerTick() public {
-        bytes32[] memory ids = new bytes32[](7);
-        for (uint256 i = 0; i < 7; ++i) {
-            (bytes32 id, OrderData memory d) = _open(500e6 + i);
-            _fill(id, d);
-            ids[i] = id;
-        }
-        assertEq(rc.queueLength(), 7);
-        vm.warp(block.timestamp + 30);
-        _cronTick();
-        assertEq(sys.callbackCount(), 3, "capped at 3 per tick");
-        _cronTick();
-        assertEq(sys.callbackCount(), 6);
-        assertTrue(rc.cronActive());
-        _cronTick();
-        assertEq(sys.callbackCount(), 7);
-        assertFalse(rc.cronActive());
-        _runCallbacks();
-        for (uint256 i = 0; i < 7; ++i) {
-            assertEq(uint8(_status(ids[i])), uint8(OriginEscrow.Status.Settled));
-        }
-    }
-
     /// @notice Every react() path must fit Reactive's 900k reactive-transaction cap minus the ~100k the
     ///         system contract reserves. Measured with the mock system (which over-charges callbacks).
     function test_reactGas_underCap() public {
         uint256 cap = 700_000;
-        bytes32[] memory ids = new bytes32[](5);
-        for (uint256 i = 0; i < 5; ++i) {
-            (bytes32 id, OrderData memory d) = _open(500e6 + i);
-            _fill(id, d);
-            ids[i] = id;
-        }
+        (bytes32 id, OrderData memory d) = _open(1_000e6);
+        _fill(id, d);
         vm.warp(block.timestamp + 30);
-        IReactive.LogRecord memory r;
-        r.chainId = REACTIVE;
-        r.contractAddress = CRON_SOURCE;
-        r.topic0 = CRON10_TOPIC_0;
-        r.opCode = 2;
+        Vm.Log[] memory logs = _confirmNoDeliver(id, d);
+        IReactive.LogRecord memory r = _record(logs[0], DEST);
         vm.chainId(REACTIVE);
         vm.prank(SYSTEM);
         uint256 g = gasleft();
         rc.react(r);
         uint256 used = g - gasleft();
-        emit log_named_uint("worst-case drain tick gas", used);
-        assertLt(used, cap, "drain tick under cap");
+        emit log_named_uint("confirm -> settle react gas", used);
+        assertLt(used, cap, "react under cap");
     }
 
     // ------------------------------------------------------------ refunds
@@ -159,14 +198,10 @@ contract SnapsettleTest is SnapsettleHarness {
         _fill(id, d);
         vm.warp(uint256(d.fillDeadline) + GRACE + 1);
 
-        vm.chainId(ORIGIN);
-        vm.recordLogs();
-        vm.prank(user);
-        escrow.requestRefund(id); // escrow is still Open: settlement is queued
-        _deliver(vm.getRecordedLogs(), ORIGIN, address(escrow));
+        _requestRefund(id); // escrow is still Open: the fill is waiting for its confirm
         assertEq(sys.callbackCount(), 0, "no refund once a valid fill was seen");
 
-        _cronTick();
+        _confirm(id, d);
         _runCallbacks();
         assertEq(usdcOrigin.balanceOf(solverRepay), 50_000e6, "solver still paid");
     }
@@ -270,7 +305,9 @@ contract SnapsettleTest is SnapsettleHarness {
     function test_foreignLogs_areIgnored() public {
         (bytes32 id, OrderData memory d) = _open(50e6);
         // A Filled-shaped log from a contract other than the destination settler.
-        DestinationSettler impostor = new DestinationSettler();
+        DestinationSettler.Tier[] memory t = new DestinationSettler.Tier[](1);
+        t[0] = DestinationSettler.Tier(type(uint256).max, 0);
+        DestinationSettler impostor = new DestinationSettler(t);
         vm.chainId(DEST);
         vm.recordLogs();
         vm.prank(solver);
@@ -290,6 +327,47 @@ contract SnapsettleTest is SnapsettleHarness {
         vm.prank(user);
         vm.expectRevert(OriginEscrow.WrongDestination.selector);
         escrow.open(d);
+    }
+
+    // ------------------------------------------------------------ outflow cap
+
+    function test_open_rejectsOrderAboveCap() public {
+        OrderData memory d = _order(CAP + 1, CAP, uint32(block.timestamp + 1 hours));
+        vm.chainId(ORIGIN);
+        vm.prank(user);
+        vm.expectRevert(OriginEscrow.OverOutflowCap.selector);
+        escrow.open(d);
+    }
+
+    /// @notice A faulty or compromised Reactive can release at most CAP per window; the rest waits, and is
+    ///         paid when the window has room.
+    function test_outflowCap_defersThenReleases() public {
+        (bytes32 a, OrderData memory da) = _open(60_000e6);
+        (bytes32 b, OrderData memory db) = _open(60_000e6);
+        _fill(a, da);
+        _fill(b, db);
+        vm.warp(block.timestamp + 300);
+        _confirm(a, da);
+        _confirm(b, db);
+        _runCallbacks();
+        assertEq(uint8(_status(a)), uint8(OriginEscrow.Status.Settled));
+        assertEq(uint8(_status(b)), uint8(OriginEscrow.Status.Deferred), "over the cap: deferred, not lost");
+        assertEq(usdcOrigin.balanceOf(solverRepay), 60_000e6);
+
+        vm.expectRevert();
+        escrow.releaseDeferred(b); // window still full
+        vm.warp(block.timestamp + WINDOW);
+        escrow.releaseDeferred(b); // anyone may release once there is room
+        assertEq(usdcOrigin.balanceOf(solverRepay), 120_000e6);
+        assertEq(uint8(_status(b)), uint8(OriginEscrow.Status.Settled));
+    }
+
+    function _requestRefund(bytes32 id) internal {
+        vm.chainId(ORIGIN);
+        vm.recordLogs();
+        vm.prank(user);
+        escrow.requestRefund(id);
+        _deliver(vm.getRecordedLogs(), ORIGIN, address(escrow));
     }
 
     // ------------------------------------------------------------ fuzz
@@ -312,7 +390,7 @@ contract SnapsettleTest is SnapsettleHarness {
             _deliver(vm.getRecordedLogs(), ORIGIN, address(escrow));
         }
         _runCallbacks();
-        _cronTick();
+        if (filled && dest.settleDelay(amount) > 0) _confirm(id, d);
         _runCallbacks();
 
         uint256 toSolver = usdcOrigin.balanceOf(solverRepay);

@@ -21,7 +21,8 @@ const put = (id: string, html: string) => {
 };
 /** A seconds value that rolls up when it comes into view (Number Ticker); minutes stay static. */
 const tk = (sec: number, text: string) => text.startsWith("<") ? `&lt;${text.slice(1)}` : (sec < 60 && text.endsWith(" s") ? `<span data-tick="${sec}" data-dec="${sec < 10 && sec % 1 ? 1 : 0}" data-unit=" s">${text}</span>` : text);
-const ACROSS_DOCS = "https://docs.across.to/user-docs/how-across-works/speed";
+const ACROSS_DOCS = "https://docs.across.to/introduction/refunds";
+const HUBPOOL = "https://etherscan.io/address/0xc186fA914353c44b2E33eBE05f21846F1048bEda#readContract";
 const REPO = "https://github.com/MeghVyas3132/snapsettle";
 
 let scene: ClockScene | null = null;
@@ -46,12 +47,12 @@ const words = (s: number) => (s <= 1.05 ? "one second" : s < 10 ? `${s.toFixed(s
 const loadedAt = performance.now();
 function tickLcds() {
   if (!scene) return;
-  const left = 7200 - (performance.now() - loadedAt) / 1000;
-  scene.lcdLeft.set(hms(Math.max(0, left)), { caption: "ACROSS" });
+  // Across's challenge period, read on-chain from the live HubPool: liveness() = 1800 s. Bundles add up to ~1.5 h on top.
+  const left = 1800 - (performance.now() - loadedAt) / 1000;
+  scene.lcdLeft.set(hms(Math.max(0, left)), { caption: "ACROSS · CHALLENGE" });
   if (replaying) return;
-  const st = statMs(store.latestRun(0), LEGS.fillToRepaid);
-  // Idle, the right clock shows the recorded median: labelled P50, never LIVE.
-  scene.lcdRight.set(st ? hms(st.p50 / 1000) : "-:--:--", { caption: "SNAPSETTLE · P50" });
+  // Idle, the right clock shows the recorded median fill → repaid (method B, 200 ms resolution): labelled P50, never LIVE.
+  scene.lcdRight.set(heroP50Ms !== null ? hms(heroP50Ms / 1000, true) : "-:--:--", { caption: "SNAPSETTLE · P50" });
 }
 
 // ---------------------------------------------------------------- notes pinned to the object
@@ -68,7 +69,7 @@ function renderNotes() {
     s ? `p50 <b>${cross ? crossChain(s.p50 / 1000) : fmtS(s.p50 / 1000)}</b> · p95 <b>${cross ? crossChain(s.p95 / 1000) : fmtS(s.p95 / 1000)}</b>` : "not measured yet";
   const where = store.env === "live" ? "live loops" : "local loops";
 
-  note("across", "lcdLeft", "hero", -150, -118, `<span class="k">Across</span> default challenge period<br><b>2 h</b> before a relayer is repaid · <a href="${ACROSS_DOCS}" target="_blank" rel="noopener">docs</a>`);
+  note("across", "lcdLeft", "hero", -150, -118, `<span class="k">Across</span> challenge period, on-chain: <b>30 min</b><br>after a bundle of up to ~1.5 h · <a href="${HUBPOOL}" target="_blank" rel="noopener">HubPool</a> <code>liveness() = 1800</code>`);
   note("snap", "lcdRight", "hero", 120, -132, `<span class="k">Snapsettle</span> fill → solver repaid<br>${pp(f, true)} · ${f?.n ?? 0} ${where}`);
 
   note("escrow", "chipEscrow", "open", -30, 170, `<span class="k">OriginEscrow</span> · Base Sepolia<br>${link("origin", "address", a.escrow)} holds the user's USDC`);
@@ -83,7 +84,7 @@ function renderNotes() {
 
   const delays = store.tiers.map((t) => (t.delay === 0 ? "0 s" : `${t.delay} s`)).join(" / ") || "—";
   note("dip", "dip", "tiers", 40, 120, `<span class="k">Finality tier</span> · per order<br>${delays} · <code>estimatedDelaySeconds</code>`);
-  note("cron", "crystal", "tiers", -40, -110, `<span class="k">Cron10</span> drains delayed settlements<br>at most 3 per tick, under the 900k gas cap`, true);
+  note("confirm", "chipSettler", "tiers", 40, -130, `<span class="k">confirm()</span> after the delay<br>re-reads the fill on Unichain before any payout · no cron`, true);
 
   const neg = latestNegatives();
   const wrong = neg.find((n) => /wrong|terms/i.test(n.name));
@@ -94,20 +95,29 @@ function renderNotes() {
 
 function latestNegatives() {
   const m = new Map<string, (typeof store.evidence.negatives)[number]>();
-  for (const n of store.evidence.negatives) m.set(n.name, n);
+  // Prefer cases run on the current contracts; fall back to the previous deployment's run until they exist.
+  const cur = store.evidence.negatives.filter((n) => n.deployment !== "previous");
+  for (const n of cur.length ? cur : store.evidence.negatives) m.set(n.name, n);
   return [...m.values()];
 }
 
 // ---------------------------------------------------------------- chapters
 
+let heroP50Ms: number | null = null;
 function renderHero() {
   const run = store.latestRun(0);
-  const f = statMs(run, LEGS.fillToRepaid);
-  $("hero-p50").textContent = f ? words(Math.max(1, f.p50 / 1000)) : "seconds";
-  const wall = run?.summary["fillToSettle_ms"];
-  $("hero-src").innerHTML = !run || !f
-    ? store.env === "live" ? "Live numbers appear here once the bench has run." : "No local bench runs yet."
-    : `${store.env === "local" ? "<b>Local harness, not Reactive Network latency.</b> " : ""}Median time from the solver's fill on Unichain Sepolia to its repayment on Base Sepolia, over ${f.n} ${store.env} loops, on the chains' own block clocks. One observer polling public RPCs saw p50 ${fmtS((wall?.p50 ?? NaN) / 1000)}, an upper bound. Across's 2-hour window is its <a href="${ACROSS_DOCS}" target="_blank" rel="noopener">documented default</a>.`;
+  // Fill → repaid, sub-second: the whole loop counted in Base blocks minus the solver's own fill time (method B).
+  const b = (run?.loops ?? [])
+    .filter((l) => l.ok && typeof l.seg.fullBase_ms === "number" && typeof l.seg.openToFill_ms === "number")
+    .map((l) => (l.seg.fullBase_ms as number) - (l.seg.openToFill_ms as number))
+    .sort((x, y) => x - y);
+  const p = (q: number) => b[Math.min(b.length - 1, Math.max(0, Math.ceil((q / 100) * b.length) - 1))];
+  heroP50Ms = b.length ? p(50) : null;
+  const full = statMs(store.newestRun(0), LEGS.full);
+  $("hero-p50").textContent = b.length ? `about ${words(Math.max(1, Math.round(p(50) / 1000)))}` : "in seconds";
+  $("hero-src").innerHTML = !b.length
+    ? store.env === "live" ? "Live numbers appear here once the bench has run on the current contracts." : "No local bench runs yet."
+    : `${store.env === "local" ? "<b>Local harness, not Reactive Network latency.</b> " : ""}Fill on Unichain Sepolia to solver repaid on Base Sepolia: p50 ${fmtS(p(50) / 1000)}, p95 ${fmtS(p(95) / 1000)} over ${b.length} ${store.env} loops (the whole loop counted in Base blocks, minus the solver's own fill time). Whole loop, open to repaid: p50 ${fmtS((full?.p50 ?? NaN) / 1000)}. Across's challenge period: <code>cast call 0xc186…bEda "liveness()(uint32)"</code> on Ethereum returns 1800 (30 min), after bundles every ~1.5 h (<a href="${ACROSS_DOCS}" target="_blank" rel="noopener">docs</a>).`;
 }
 
 function renderLegs() {

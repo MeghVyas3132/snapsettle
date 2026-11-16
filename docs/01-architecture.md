@@ -15,7 +15,10 @@ user: OriginEscrow.open(d)
                                     check: hash == order terms,
                                            fillTime <= deadline
                                     tier 0: requestCallback(settle) now
-                                    tier n: queue, settle on Cron10 once ready
+                                    tier n: Queued until Confirmed
+                                                                          anyone, after fillTime + delay: confirm(id, d)
+                                   react() ◄──────────────────────────────── Confirmed (fill still in state)
+                                    requestCallback(settle)
 OriginEscrow.settle(rvm, id, repayTo) ◄── callback via proxy
   pay escrowed input to solver
 ```
@@ -27,8 +30,8 @@ Refund path: after `fillDeadline + refundGrace`, the user calls `requestRefund` 
 | Contract | Chain | Role |
 |---|---|---|
 | `OriginEscrow` | Base Sepolia | `open` escrows input and emits `Opened(id, user, OrderData)`; `requestRefund`; callbacks `settle`/`refund` (guarded by `onlyServiceProvider` + `onlyCallbackSender`); idempotent (duplicates emit `CallbackSkipped`) |
-| `DestinationSettler` | Unichain Sepolia | `fill` pays output to the recipient, rejects late and duplicate fills, emits `Filled(id, solver, orderHash, repayTo, fillTime)` |
-| `SnapsettleReactive` | Lasna | Subscribes to `Opened`, `RefundRequested`, `Filled`; matches; tiers; Cron10 queue; requests callbacks |
+| `DestinationSettler` | Unichain Sepolia | `fill` pays output to the recipient, rejects late and duplicate fills, emits `Filled(id, solver, orderHash, repayTo, fillTime)`; `confirm` (delayed tiers) emits `Confirmed` once the delay has passed and the fill is still in state |
+| `SnapsettleReactive` | Lasna | Subscribes to `Opened`, `RefundRequested`, `Filled`, `Confirmed`; matches; tiers; requests callbacks; no cron |
 
 ## Why the reactive contract does real work
 
@@ -36,15 +39,15 @@ The origin chain cannot see the destination chain. Without Reactive you need eit
 
 ## Finality policy (tiers)
 
-`settleDelay(inputAmount)` picks the first tier whose `maxAmount` covers the order. Default deployment (ESTIMATE, to be tuned with measured data):
+`settleDelay(inputAmount)` picks the first tier whose `maxAmount` covers the order. Live testnet deployment:
 
 | Order size (USDC) | Delay after fill is observed |
 |---|---|
-| ≤ 100 | 0 s (settle on sight) |
-| ≤ 10,000 | 30 s |
-| above | 300 s |
+| ≤ 0.5 (testnet) | 0 s (settle on sight) |
+| ≤ 2 (testnet) | 30 s, then confirm |
+| above | 300 s, then confirm |
 
-The delay is what a resolver should surface to solvers as `estimatedDelaySeconds` (plus measured loop latency). Delayed settlements are drained on **Cron10** ticks (every 10 Lasna blocks, ~10 s), at most 3 per tick (gas cap). The Cron10 subscription is held only while the queue is non-empty, because cron ticks are billed even when idle.
+The delay is what a resolver surfaces to solvers as `estimatedDelaySeconds` (plus measured loop latency). Delayed orders settle from the destination's `Confirmed` event, which re-checks the fill after the delay; v1 drained a queue on Cron10 instead, which cost a reactive transaction per tick and re-checked nothing (see DECISIONS.md). `OriginEscrow` caps what the Reactive path can release per hour (`outflowCap`, `outflowWindow`); over the cap, a settlement is deferred and anyone can `releaseDeferred` it later.
 
 ## Safety properties (tested)
 

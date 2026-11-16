@@ -95,14 +95,31 @@ contract SnapsettleResolver is IResolver {
             IAttribute.RevertPolicy, ("abort", abi.encodePacked(DestinationSettler.FillDeadlinePassed.selector))
         );
 
-        r.steps = new bytes[](1);
+        uint32 delay = settleDelay(inputAmount);
+        r.steps = new bytes[](delay == 0 ? 1 : 2);
         r.steps[0] =
             abi.encodeCall(IStep.Call, (interop(dst, destinationSettler), DestinationSettler.fill.selector, args, attrs));
+        if (delay > 0) {
+            // Step 1 (delayed tiers): DestinationSettler.confirm(orderId, d), callable once `delay` seconds have
+            // passed since the fill. Reactive settles from the resulting `Confirmed` event.
+            bytes[] memory cargs = new bytes[](2);
+            cargs[0] = abi.encode("", orderId);
+            cargs[1] = abi.encode("", d);
+            bytes[] memory cattrs = new bytes[](2);
+            cattrs[0] = abi.encodeCall(
+                IAttribute.RevertPolicy, ("retry", abi.encodePacked(DestinationSettler.TooEarly.selector))
+            );
+            cattrs[1] = abi.encodeCall(
+                IAttribute.RevertPolicy, ("abort", abi.encodePacked(DestinationSettler.AlreadyConfirmed.selector))
+            );
+            r.steps[1] = abi.encodeCall(
+                IStep.Call, (interop(dst, destinationSettler), DestinationSettler.confirm.selector, cargs, cattrs)
+            );
+        }
 
         r.variables = new bytes[](1);
         r.variables[0] = abi.encodeCall(IVariableRole.PaymentRecipient, ());
 
-        uint32 delay = settleDelay(inputAmount);
         r.payments = new bytes[](1);
         r.payments[0] = abi.encodeCall(
             IPayment.ERC20,
@@ -119,8 +136,8 @@ contract SnapsettleResolver is IResolver {
         r.assumptions = new Assumption[](2);
         // The escrow only releases on a callback from this reactive contract on this chain.
         r.assumptions[0] = Assumption("reactive-settlement", abi.encode(reactiveChainId, reactiveContract));
-        // Reactive acts on observed events even if the observed chain later reorganises; this order waits
-        // `delay` seconds after the fill is observed before settling.
+        // Reactive acts on observed events even if the observed chain later reorganises. A delayed order settles
+        // only after `delay` seconds AND a confirm that re-checks the fill is still in the destination's state.
         r.assumptions[1] = Assumption("reactive-origin-finality", abi.encode(uint256(delay)));
     }
 

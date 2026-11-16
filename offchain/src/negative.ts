@@ -55,6 +55,16 @@ async function fill(id: Hex, order: OrderData, forceGas = false): Promise<{ tx: 
   return { tx, status: r.status };
 }
 
+/** The solver's second step for delayed tiers. `forceGas` sends it even if it would revert, for on-chain evidence. */
+async function confirm(id: Hex, order: OrderData, forceGas = false): Promise<{ tx: Hex; status: string }> {
+  const tx = await solver.writeContract({
+    address: addr.destinationSettler, abi: abi.dest, functionName: "confirm", args: [id, order],
+    chain: chains.dest, account: solver.account!, ...(forceGas ? { gas: 200_000n } : {}),
+  });
+  const r = await pub.dest.waitForTransactionReceipt({ hash: tx });
+  return { tx, status: r.status };
+}
+
 async function requestRefund(id: Hex): Promise<Hex> {
   const tx = await user.writeContract({ address: addr.escrow, abi: abi.escrow, functionName: "requestRefund", args: [id], chain: chains.origin, account: user.account! });
   await pub.origin.waitForTransactionReceipt({ hash: tx });
@@ -112,12 +122,24 @@ async function refundAfterFill(hub: EventHub, largeAmt: bigint, largeDelay: numb
   const accepted = await hub.waitFor("FillAccepted", o.id, 120_000);
   const waitMs = (15 + g + 5) * 1000 - 5000;
   await sleep(Math.max(0, waitMs));
-  const rr = await requestRefund(o.id); // allowed by the escrow: settlement is still queued on Lasna
-  const settled = await hub.waitFor("Settled", o.id, (largeDelay + 180) * 1000);
+  const rr = await requestRefund(o.id); // allowed by the escrow: the fill is waiting for its confirm on Unichain
+  // A confirm before the tier's delay is refused on-chain (sent anyway so the revert is on record).
+  const early = await confirm(o.id, o.order, true);
+  record("confirm before the delay is refused", early.status === "reverted", `early confirm status: ${early.status}`,
+    { open: o.tx, fill: f.tx, earlyConfirm: early.tx });
+  const fillBlock = await pub.dest.getTransactionReceipt({ hash: f.tx });
+  const fillTs = Number((await pub.dest.getBlock({ blockNumber: fillBlock.blockNumber })).timestamp);
+  for (;;) {
+    const head = Number((await pub.dest.getBlock()).timestamp);
+    if (head >= fillTs + largeDelay + 1) break;
+    await sleep(2000);
+  }
+  const c = await confirm(o.id, o.order);
+  const settled = await hub.waitFor("Settled", o.id, 180_000);
   const refunded = hub.get("Refunded", o.id) ?? hub.get("RefundCallbackRequested", o.id);
   record("refund request is ignored after a valid fill", Boolean(settled) && !refunded,
-    `solver ${settled ? "paid" : "NOT paid"}; refund ${refunded ? "HAPPENED" : "not issued"}`,
-    { open: o.tx, fill: f.tx, fillAccepted: accepted?.tx, requestRefund: rr, settle: settled?.tx });
+    `solver ${settled ? "paid" : "NOT paid"} after confirm; refund ${refunded ? "HAPPENED" : "not issued"}`,
+    { open: o.tx, fill: f.tx, fillAccepted: accepted?.tx, requestRefund: rr, confirm: c.tx, settle: settled?.tx });
 }
 
 async function main() {

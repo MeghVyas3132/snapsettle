@@ -8,6 +8,7 @@
     "bench": "tsx src/bench.ts",
     "recover": "tsx src/recover.ts",
     "demo": "tsx src/demo.ts",
+    "reorgcheck": "tsx src/reorgcheck.ts",
     "negative": "tsx src/negative.ts",
     "typecheck": "tsc --noEmit",
     "judge": "tsx src/judge.ts",

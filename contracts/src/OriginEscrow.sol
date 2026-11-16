@@ -13,6 +13,11 @@ import {OrderData, OrderLib} from "./OrderTypes.sol";
 ///         Only the Snapsettle reactive contract, through the Reactive callback proxy, can release the
 ///         escrow: to the solver once a matching fill was observed on the destination chain, or back to
 ///         the user once the order expired unfilled.
+///
+///         Outflow cap: at most `outflowCap` of a token is paid to solvers per `outflowWindow`. If Reactive
+///         were faulty or compromised, this bounds what it could release before the fast path stops. A
+///         settlement over the cap is deferred, not lost: anyone can release it once the window has room.
+///         Refunds are not capped; they only return funds to the order's own user.
 /// @dev Callbacks never revert on a state mismatch (a reverted callback is still billed); they emit
 ///      `CallbackSkipped` instead, which also makes duplicate deliveries harmless.
 contract OriginEscrow is AbstractCallback, ReentrancyGuard {
@@ -22,7 +27,13 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
         None,
         Open,
         Settled,
-        Refunded
+        Refunded,
+        Deferred // settled by Reactive, waiting for room under the outflow cap
+    }
+
+    struct Window {
+        uint64 start;
+        uint192 used;
     }
 
     struct Order {
@@ -40,6 +51,12 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
     /// @notice The only destination this escrow accepts orders for (chain and settler contract).
     uint256 public immutable destinationChainId;
     address public immutable destinationSettler;
+    /// @notice Most of one token released to solvers per `outflowWindow` seconds.
+    uint256 public immutable outflowCap;
+    uint256 public immutable outflowWindow;
+
+    mapping(address token => Window) public outflow;
+    mapping(bytes32 orderId => address repayTo) public deferred;
 
     mapping(bytes32 orderId => Order) public orders;
     mapping(address user => uint256) public nonces;
@@ -49,6 +66,7 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
     event Settled(bytes32 indexed orderId, address indexed repayTo, uint256 amount);
     event Refunded(bytes32 indexed orderId, address indexed user, uint256 amount);
     event CallbackSkipped(bytes32 indexed orderId, Status status);
+    event SettleDeferred(bytes32 indexed orderId, address indexed repayTo, uint256 availableAt);
 
     error ZeroAmount();
     error ZeroAddress();
@@ -57,17 +75,26 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
     error NotOrderUser();
     error RefundTooEarly(uint256 availableAt);
     error WrongDestination();
+    error OverOutflowCap();
+    error NotDeferred();
+    error CapReached(uint256 availableAt);
+    error BadCap();
 
     constructor(
         IPayable callbackProxy_,
         address reactiveContract_,
         uint32 refundGrace_,
         uint256 destinationChainId_,
-        address destinationSettler_
+        address destinationSettler_,
+        uint256 outflowCap_,
+        uint256 outflowWindow_
     ) payable AbstractCallback(callbackProxy_, reactiveContract_) {
+        if (outflowCap_ == 0 || outflowWindow_ == 0) revert BadCap();
         refundGrace = refundGrace_;
         destinationChainId = destinationChainId_;
         destinationSettler = destinationSettler_;
+        outflowCap = outflowCap_;
+        outflowWindow = outflowWindow_;
     }
 
     /// @notice Opens an order and escrows `d.inputAmount` of `d.inputToken` (approve first).
@@ -80,6 +107,8 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
         if (d.destinationChainId != destinationChainId || d.destinationSettler != destinationSettler) {
             revert WrongDestination();
         }
+        // An order larger than the cap could never be released through the fast path.
+        if (d.inputAmount > outflowCap) revert OverOutflowCap();
 
         id = OrderLib.orderId(block.chainid, address(this), msg.sender, nonces[msg.sender]++, d);
         orders[id] = Order(msg.sender, d.inputToken, d.inputAmount, d.fillDeadline, Status.Open, OrderLib.hash(d));
@@ -111,9 +140,39 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
             emit CallbackSkipped(id, o.status);
             return;
         }
+        if (!_take(o.inputToken, o.inputAmount)) {
+            o.status = Status.Deferred;
+            deferred[id] = repayTo;
+            emit SettleDeferred(id, repayTo, uint256(outflow[o.inputToken].start) + outflowWindow);
+            return;
+        }
         o.status = Status.Settled;
         IERC20(o.inputToken).safeTransfer(repayTo, o.inputAmount);
         emit Settled(id, repayTo, o.inputAmount);
+    }
+
+    /// @notice Pays a settlement that was deferred by the outflow cap, once the window has room. Anyone may call.
+    function releaseDeferred(bytes32 id) external nonReentrant {
+        Order storage o = orders[id];
+        if (o.status != Status.Deferred) revert NotDeferred();
+        if (!_take(o.inputToken, o.inputAmount)) revert CapReached(uint256(outflow[o.inputToken].start) + outflowWindow);
+        address repayTo = deferred[id];
+        delete deferred[id];
+        o.status = Status.Settled;
+        IERC20(o.inputToken).safeTransfer(repayTo, o.inputAmount);
+        emit Settled(id, repayTo, o.inputAmount);
+    }
+
+    /// @dev Books `amount` against the token's current window; false if it would exceed the cap.
+    function _take(address token, uint256 amount) internal returns (bool) {
+        Window storage w = outflow[token];
+        if (block.timestamp >= uint256(w.start) + outflowWindow) {
+            w.start = uint64(block.timestamp);
+            w.used = 0;
+        }
+        if (uint256(w.used) + amount > outflowCap) return false;
+        w.used += uint192(amount);
+        return true;
     }
 
     /// @notice Callback: returns the escrowed input to the user of an expired, unfilled order.

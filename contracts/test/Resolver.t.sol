@@ -43,6 +43,22 @@ contract ResolverTest is SnapsettleHarness {
 
     // ------------------------------------------------------------ tests
 
+    function test_resolve_delayedOrder_secondStepIsConfirm() public {
+        (bytes32 id, OrderData memory d) = _open(1_000e6);
+        vm.chainId(ORIGIN);
+        IResolver.ResolvedOrder memory r = resolver.resolve(abi.encode(id, d));
+        (bytes memory target, bytes4 sel,,) = abi.decode(_args(r.steps[1]), (bytes, bytes4, bytes[], bytes[]));
+        assertEq(target, resolver.interop(DEST, address(dest)));
+        assertEq(sel, DestinationSettler.confirm.selector);
+    }
+
+    function test_resolve_onSightOrder_hasOnlyTheFillStep() public {
+        (bytes32 id, OrderData memory d) = _open(50e6);
+        vm.chainId(ORIGIN);
+        IResolver.ResolvedOrder memory r = resolver.resolve(abi.encode(id, d));
+        assertEq(r.steps.length, 1);
+    }
+
     function test_interop_matchesErc7930Example() public view {
         // ERC-7930 Example 1: Ethereum mainnet, 0xd8dA…6045.
         assertEq(
@@ -57,7 +73,7 @@ contract ResolverTest is SnapsettleHarness {
         vm.chainId(ORIGIN);
         IResolver.ResolvedOrder memory r = resolver.resolve(abi.encode(id, d));
 
-        assertEq(r.steps.length, 1);
+        assertEq(r.steps.length, 2, "30 s tier: fill, then confirm");
         assertEq(_selector(r.steps[0]), IStep.Call.selector);
         (bytes memory target, bytes4 sel, bytes[] memory args, bytes[] memory attrs) =
             abi.decode(_args(r.steps[0]), (bytes, bytes4, bytes[], bytes[]));

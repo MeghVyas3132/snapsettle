@@ -11,7 +11,7 @@ Snapsettle answers with working code: Reactive observes the destination fill dir
 
 ## The pain (sourced)
 
-- Across repays relayers after an optimistic challenge period, **2 hours by default**, with bundles proposed every ~1.5 h; disputes go to UMA's Optimistic Oracle. https://docs.across.to/user-docs/how-across-works/speed, https://docs.across.to/guides/concepts/intents-architecture
+- Across repays relayers in bundles proposed every ~1.5 h at minimum (https://docs.across.to/introduction/refunds), each followed by a challenge period; disputes go to UMA's Optimistic Oracle. The live HubPool's challenge period is **30 minutes**: `cast call 0xc186fA914353c44b2E33eBE05f21846F1048bEda "liveness()(uint32)"` returns 1800 (read 16 Nov 2026). `HubPool.sol`'s 7200 s default and older docs' "2 hours" are stale. A relayer therefore waits roughly 30 min to 2 h.
 - The relayer fee must cover the opportunity cost of capital over that window. https://across.to/blog/The-Intents-bridge-How-Across-uses-optimistic-verification-to-lower-costs
 - ERC-7683 (Draft) is now resolver-centric: protocols keep their own settlement; payments carry `estimatedDelaySeconds` ("The payment SHOULD be delayed by `estimatedDelaySeconds` with high confidence"). https://eips.ethereum.org/EIPS/eip-7683
 
@@ -31,6 +31,6 @@ About 20 entries in Every Second Counts (submitted plus public repos): stop-loss
 ## Honest limits (say these before the judges do)
 
 - On testnet the solver is our own bot; there is no live solver market.
-- The Across window is quoted from its docs, not measured here (Across is not deployed on these testnets).
+- Across's challenge period is read on-chain from its mainnet HubPool; the bundle cadence is from its docs. Across is not deployed on these testnets, so nothing here is a head-to-head run.
 - A destination reorg after settlement would pay a solver for a fill that no longer exists; the finality tiers bound this, they do not remove it.
 - ERC-7683 is a Draft; Snapsettle is positioned as a settlement layer any resolver can point to, not as a new bridge.

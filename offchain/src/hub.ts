@@ -64,8 +64,8 @@ export class EventHub {
   constructor() {
     this.watchers = [
       new ChainWatcher(pub.origin, addr.escrow, abi.escrow, ["Opened", "Settled", "Refunded", "RefundRequested", "CallbackSkipped"], this.seen),
-      new ChainWatcher(pub.dest, addr.destinationSettler, abi.dest, ["Filled"], this.seen),
-      new ChainWatcher(pub.lasna, addr.reactive, abi.reactive, ["OrderObserved", "FillAccepted", "FillRejected", "SettlementRequested", "RefundCallbackRequested"], this.seen),
+      new ChainWatcher(pub.dest, addr.destinationSettler, abi.dest, ["Filled", "Confirmed"], this.seen),
+      new ChainWatcher(pub.lasna, addr.reactive, abi.reactive, ["OrderObserved", "FillAccepted", "FillRejected", "FillConfirmed", "SettlementRequested", "RefundCallbackRequested"], this.seen),
     ];
   }
 

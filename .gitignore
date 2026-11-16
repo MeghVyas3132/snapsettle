@@ -17,3 +17,6 @@ video/raw/
 video/*.mp4
 .secrets/
 .live/
+
+# Placeholders only; the real offchain/.env stays ignored.
+!offchain/.env.example

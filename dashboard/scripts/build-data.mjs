@@ -62,11 +62,19 @@ for (const env of envs) {
       if (d.startsWith("bench-") && existsSync(sum)) {
         const s = readJson(sum);
         const loops = readFileSync(join(evDir, d, "loops.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-        runs.push({ run: d, ...s, loops: loops.map((r) => ({ i: r.i, orderId: r.orderId, ok: r.ok, seg: r.seg, tx: r.tx, settleSeenBy: r.settleSeenBy })) });
+        // Which deployment produced this run: the current one (matching escrow) or an earlier one.
+        const current = (config.addresses.escrow ?? "").toLowerCase();
+        const deployment = s.contracts?.escrow?.toLowerCase() === current ? "current" : "previous";
+        runs.push({ run: d, ...s, deployment, loops: loops.map((r) => ({ i: r.i, orderId: r.orderId, ok: r.ok, seg: r.seg, tx: r.tx, settleSeenBy: r.settleSeenBy })) });
       }
       const cases = join(evDir, d, "cases.jsonl");
       if (d.startsWith("negative-") && existsSync(cases)) {
-        for (const l of readFileSync(cases, "utf8").trim().split("\n").filter(Boolean)) negatives.push({ run: d, ...JSON.parse(l) });
+        // Negative runs carry no contract field: date them against the current deployment's go-live time.
+        const atFile = join(root, "contracts/deployments", env, "deployed-at.json");
+        const at = existsSync(atFile) ? JSON.parse(readFileSync(atFile, "utf8")) : {};
+        const stamp = Date.parse(d.slice(9).replace(/T(\d\d)-(\d\d)-(\d\d)-(\d{3})Z$/, "T$1:$2:$3.$4Z"));
+        const deployment = env === "live" && at.v2 && stamp < Date.parse(at.v2) ? "previous" : "current";
+        for (const l of readFileSync(cases, "utf8").trim().split("\n").filter(Boolean)) negatives.push({ run: d, deployment, ...JSON.parse(l) });
       }
     }
   }
