@@ -1,0 +1,50 @@
+# Snapsettle backend on the OCI server. Lives in /srv/snapsettle (next to the existing /srv/edge).
+# Built so it can never crowd the server's other services:
+#   - together at most 0.75 CPU and 768 MB of memory, no swap (if it misbehaves, only it is stopped)
+#   - low CPU priority (cpu_shares 256 vs the default 1024), logs capped at 3 x 10 MB per container
+#   - no published ports: the demo API is reached only through the existing Caddy, on the `edge` network
+# Updated by deploy/oci/update.sh (cron, every 2 minutes) when a new image is published by GitHub Actions.
+name: snapsettle
+x-common: &common
+  image: ghcr.io/meghvyas3132/snapsettle-backend:latest
+  restart: unless-stopped
+  env_file: /srv/snapsettle/secrets.env          # testnet-only keys and RPC URLs; chmod 600, never in git
+  volumes:
+    - /srv/snapsettle/evidence:/app/evidence     # fills, skips, demo and relay logs, solver heartbeat
+  cpu_shares: 256
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+services:
+  solver:
+    <<: *common
+    command: ["node", "--import", "tsx", "src/solver.ts"]
+    cpus: 0.5
+    mem_limit: 512m
+    memswap_limit: 512m
+    healthcheck:
+      test: ["CMD", "node", "-e", "const t=+require('fs').readFileSync('/app/evidence/live/solver/heartbeat','utf8');process.exit(Date.now()-t<120000?0:1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+  demo:
+    <<: *common
+    command: ["node", "--import", "tsx", "src/demo.ts"]
+    environment:
+      DEMO_PORT: "8787"
+      DEMO_INTERVAL_S: "3600"
+      DEMO_ORIGINS: "https://snapsettle.aexiz.in,https://meghvyas3132.github.io"
+    cpus: 0.25
+    mem_limit: 256m
+    memswap_limit: 256m
+    networks: [default, edge]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+networks:
+  edge:
+    external: true   # the existing Caddy network; Caddy reaches the demo service as snapsettle-demo-1:8787

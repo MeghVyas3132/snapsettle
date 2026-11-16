@@ -3,6 +3,7 @@
 // against its whitelist, builds the fill call from the resolved step, and executes it from its own inventory.
 // Repayment arrives on the origin chain when Reactive observes the fill.
 import { createPublicClient, decodeFunctionData, encodeAbiParameters, hexToBigInt, maxUint256, size, slice, toFunctionSelector, webSocket, type Address, type Hex } from "viem";
+import { writeFileSync } from "node:fs";
 import { ENV, chains, pub, addr, abi, wallet, ORDER_TUPLE, evidenceDir, appendJsonl, sleep, now, blockTs, type OrderData } from "./common.ts";
 
 const solverDest = wallet("solver", "dest");
@@ -215,8 +216,12 @@ async function main() {
     if (next > from) from = next;
   };
 
+  // Heartbeat for health checks: written at most every 15 s, and only while scans succeed.
+  const beat = `${evidenceDir("solver")}/heartbeat`;
+  let lastBeat = 0;
   for (;;) {
-    await scan().catch((e) => console.error(`scan failed, retrying: ${(e as Error).message.split("\n")[0]}`));
+    const ok = await scan().then(() => true, (e) => { console.error(`scan failed, retrying: ${(e as Error).message.split("\n")[0]}`); return false; });
+    if (ok && now() - lastBeat > 15_000) { lastBeat = now(); writeFileSync(beat, String(lastBeat)); }
     await sleep(100);
   }
 }

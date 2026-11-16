@@ -1,0 +1,22 @@
+# Snapsettle demo/relay API on api.snapsettle.aexiz.in. Testnet only.
+#
+# Load this file only after the DNS record resolves to this server (A api.snapsettle -> 140.238.167.7, DNS only):
+# Caddy orders a certificate the moment it sees the block, and failed authorisations count toward Let's Encrypt's
+# limit of five per hostname per hour.
+#
+# Upstream: the `demo` container of /srv/snapsettle (compose project "snapsettle"), on the shared `edge` network.
+# It only answers GET /status, GET /health, POST /order, /relay and /drip, each rate-limited inside the service.
+api.snapsettle.aexiz.in {
+	encode gzip
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+	request_body {
+		max_size 8KB
+	}
+	reverse_proxy snapsettle-demo-1:8787 {
+		header_up X-Forwarded-For {remote_host}
+	}
+}

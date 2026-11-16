@@ -1,0 +1,15 @@
+**/node_modules
+**/.env
+.secrets
+.live
+.local
+evidence
+dashboard
+packages
+video
+contracts/lib
+contracts/cache
+contracts/broadcast
+contracts/test
+**/*.md
+.git

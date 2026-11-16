@@ -27,6 +27,9 @@ jobs:
         working-directory: dashboard
       - run: pnpm build
         working-directory: dashboard
+        env:
+          # The backend's public URL (repository variable). Unset: the site works without relay, drip or one-click orders.
+          DEMO_API: ${{ vars.DEMO_API }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dashboard/dist

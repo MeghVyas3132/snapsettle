@@ -12,6 +12,7 @@
 //                 `openFor` and pays the gas. Terms are checked here and again by the escrow; the signature binds them.
 //   POST /drip    { address } → { tx, amount }   0.3 test USDC on Base Sepolia, once per address per day
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
 import { getAddress, isAddress, maxUint256, parseEventLogs, type Address, type Hex } from "viem";
 import { ENV, chains, pub, addr, abi, wallet, evidenceDir, appendJsonl, sleep, type OrderData } from "./common.ts";
 
@@ -170,6 +171,18 @@ async function guarded(source: string, ip?: string) {
   }
 }
 
+let fuelCache = { at: 0, lreact: NaN };
+async function health() {
+  let solverHeartbeatAgeS: number | null = null;
+  try { solverHeartbeatAgeS = Math.round((Date.now() - Number(readFileSync(`${evidenceDir("solver")}/heartbeat`, "utf8"))) / 1000); } catch { /* no heartbeat yet */ }
+  if (Date.now() - fuelCache.at > 60_000) {
+    try { fuelCache = { at: Date.now(), lreact: Number(await pub.lasna.getBalance({ address: addr.reactive })) / 1e18 }; } catch { /* keep the last reading */ }
+  }
+  const fuelOrders = Number.isFinite(fuelCache.lreact) ? Math.floor(fuelCache.lreact / 0.045) : null;
+  const healthy = solverHeartbeatAgeS !== null && solverHeartbeatAgeS < 120 && (fuelOrders === null || fuelOrders > 50);
+  return { healthy, solverHeartbeatAgeS, fuelLreact: Number.isFinite(fuelCache.lreact) ? Number(fuelCache.lreact.toFixed(3)) : null, fuelOrders };
+}
+
 function send(req: IncomingMessage, res: ServerResponse, code: number, body: unknown) {
   const origin = req.headers.origin ?? "";
   if (ORIGINS.includes(origin) || ORIGINS.includes("*")) res.setHeader("Access-Control-Allow-Origin", origin || "*");
@@ -196,7 +209,12 @@ async function main() {
     }
     const ip = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "?").split(",")[0].trim();
     if (req.method === "GET" && req.url === "/status") {
-      return send(req, res, 200, { env: ENV, address: userAddr, amount: amount.toString(), lastOrder, nextHeartbeatInS: Math.max(0, Math.round((nextBeat - Date.now()) / 1000)), todayCount: day.count, cap: DAILY_CAP });
+      return send(req, res, 200, { env: ENV, address: userAddr, amount: amount.toString(), lastOrder, nextHeartbeatInS: Math.max(0, Math.round((nextBeat - Date.now()) / 1000)), todayCount: day.count, cap: DAILY_CAP, ...(await health()) });
+    }
+    // Health for the container check and monitoring: 200 only if the solver is scanning and the reactive contract has fuel.
+    if (req.method === "GET" && req.url === "/health") {
+      const h = await health();
+      return send(req, res, h.healthy ? 200 : 503, h);
     }
     if (req.method === "POST" && req.url === "/order") {
       const why = allowed(ip);

@@ -1,0 +1,60 @@
+name: backend
+# Builds the solver/demo image for the OCI server (linux/arm64) and publishes it to GitHub's registry.
+# The server pulls it itself (deploy/oci/update.sh, cron every 2 minutes): GitHub never gets access to the server.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "offchain/**"
+      - "contracts/src/**"
+      - "contracts/deployments/live/**"
+      - "deploy/oci/**"
+      - ".github/workflows/backend.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: backend
+  cancel-in-progress: true
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: forge build
+        working-directory: contracts
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: offchain/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile && pnpm typecheck
+        working-directory: offchain
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: offchain/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/meghvyas3132/snapsettle-backend:latest
+            ghcr.io/meghvyas3132/snapsettle-backend:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/MeghVyas3132/snapsettle
+            org.opencontainers.image.description=Snapsettle solver and demo/relay service (testnet)
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
