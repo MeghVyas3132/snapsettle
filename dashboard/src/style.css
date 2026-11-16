@@ -346,6 +346,24 @@ html { scrollbar-color: var(--ink-3) var(--fog); scrollbar-width: thin; }
   .sheet__table tr.detail { display: block; }
   .sheet__table tr.detail td { display: block; }
   .note .d, .note br { display: none; }
+  /* Hero: the clock sits in the top of the screen, the claim on a paper panel under it (no text over the object). */
+  .ch--hero { min-height: 0; padding-top: 42svh; padding-bottom: 0; }
+  .ch--hero::before { content: ""; position: absolute; left: 0; right: 0; top: calc(42svh - 22px); bottom: 0; background: var(--paper); border-top: 1px solid var(--ink); }
+  .ch--hero > * { position: relative; z-index: 1; }
+  .ch--hero .hero__h { font-size: 40px; }
+  .ch--hero .hero__foot { margin-bottom: 28px; }
+  /* Prior art: one card per protocol instead of a table that scrolls sideways. */
+  .prior__scroll { overflow: visible; }
+  .prior__table { min-width: 0; display: block; }
+  .prior__table thead { display: none; }
+  .prior__table tbody, .prior__table tr { display: block; }
+  .prior__table tr { padding: 14px 0 12px; border-bottom: 1px solid var(--hair); }
+  .prior__table th, .prior__table td { display: block; border: 0; padding: 0; }
+  .prior__table tbody th { font-size: 17px; margin-bottom: 8px; white-space: normal; }
+  .prior__table td { display: grid; grid-template-columns: 9.5em 1fr; gap: 10px; padding: 3px 0; font-size: 14.5px; }
+  .prior__table td::before { content: attr(data-label); font-family: var(--mono); font-size: 10.5px; line-height: 1.6; color: var(--ink-3); }
+  /* Order list: the "live" mark goes under the number, not over the order id. */
+  .is-live .no::after { display: block; font-size: 10px; }
 }
 @media (max-width: 520px) {
   .heads { display: none; }

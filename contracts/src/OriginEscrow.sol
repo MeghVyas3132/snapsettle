@@ -53,6 +53,13 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
     address public immutable destinationSettler;
     /// @notice Most of one token released to solvers per `outflowWindow` seconds.
     uint256 public immutable outflowCap;
+    /// @notice Smallest order accepted. Every order costs the operator reactive transactions, so dust orders are refused.
+    uint256 public immutable minInputAmount;
+    /// @notice The one route this escrow serves: `inputToken` here, `outputToken` on the destination. Fixed at
+    ///         deployment, with no owner who can change it. Orders in any other token revert before an event exists,
+    ///         so spam in worthless tokens costs the reactive contract nothing.
+    address public immutable inputToken;
+    address public immutable outputToken;
     uint256 public immutable outflowWindow;
 
     mapping(address token => Window) public outflow;
@@ -79,6 +86,8 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
     error NotDeferred();
     error CapReached(uint256 availableAt);
     error BadCap();
+    error TokenNotAllowed();
+    error BelowMinimum(uint256 minInputAmount);
 
     constructor(
         IPayable callbackProxy_,
@@ -87,9 +96,16 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
         uint256 destinationChainId_,
         address destinationSettler_,
         uint256 outflowCap_,
-        uint256 outflowWindow_
+        uint256 outflowWindow_,
+        address inputToken_,
+        address outputToken_,
+        uint256 minInputAmount_
     ) payable AbstractCallback(callbackProxy_, reactiveContract_) {
-        if (outflowCap_ == 0 || outflowWindow_ == 0) revert BadCap();
+        if (outflowCap_ == 0 || outflowWindow_ == 0 || minInputAmount_ > outflowCap_) revert BadCap();
+        if (inputToken_ == address(0) || outputToken_ == address(0)) revert ZeroAddress();
+        inputToken = inputToken_;
+        outputToken = outputToken_;
+        minInputAmount = minInputAmount_;
         refundGrace = refundGrace_;
         destinationChainId = destinationChainId_;
         destinationSettler = destinationSettler_;
@@ -103,6 +119,8 @@ contract OriginEscrow is AbstractCallback, ReentrancyGuard {
         if (d.recipient == address(0) || d.inputToken == address(0) || d.outputToken == address(0)) {
             revert ZeroAddress();
         }
+        if (d.inputToken != inputToken || d.outputToken != outputToken) revert TokenNotAllowed();
+        if (d.inputAmount < minInputAmount) revert BelowMinimum(minInputAmount);
         if (d.fillDeadline <= block.timestamp) revert DeadlineInPast();
         if (d.destinationChainId != destinationChainId || d.destinationSettler != destinationSettler) {
             revert WrongDestination();

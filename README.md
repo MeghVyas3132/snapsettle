@@ -89,7 +89,7 @@ The core check needs two events on two chains: `Opened` on Base and `Filled` (or
 ## Run it
 
 ```bash
-# contracts: 34 tests, including fuzzing, a reorg case and the outflow cap
+# contracts: 36 tests, including fuzzing, a reorg case, the outflow cap and spam rejection
 cd contracts && forge test
 
 # your own solver against the live contracts, in three commands

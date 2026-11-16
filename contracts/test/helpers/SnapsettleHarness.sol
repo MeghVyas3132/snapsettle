@@ -25,6 +25,7 @@ abstract contract SnapsettleHarness is Test {
     uint32 constant GRACE = 600;
     uint256 constant CAP = 100_000e6; // outflow cap per window
     uint256 constant WINDOW = 1 hours;
+    uint256 constant MIN_ORDER = 100_000; // 0.1 USDC
 
     MockSystem sys;
     TestToken usdcOrigin;
@@ -64,7 +65,7 @@ abstract contract SnapsettleHarness is Test {
 
         vm.chainId(ORIGIN);
         usdcOrigin = new TestToken("TEST USDC", "tUSDC");
-        escrow = new OriginEscrow(IPayable(payable(proxy)), address(rc), GRACE, DEST, address(dest), CAP, WINDOW);
+        escrow = new OriginEscrow(IPayable(payable(proxy)), address(rc), GRACE, DEST, address(dest), CAP, WINDOW, address(usdcOrigin), address(usdcDest), MIN_ORDER);
 
         vm.prank(owner);
         rc.setOriginEscrow(address(escrow));

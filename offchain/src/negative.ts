@@ -105,6 +105,27 @@ async function lateFill(smallAmt: bigint) {
   record("late fill reverts on the destination", status !== "success", `fill status: ${status}`, { open: o.tx, lateFill: tx });
 }
 
+/** v3: spam never becomes an order. An order in another token and a dust order are sent with a fixed gas limit, so
+ *  each reverts on-chain as a mined transaction (no `Opened`, so no reactive transaction is spent on it). */
+async function spamRefused(smallAmt: bigint) {
+  const WETH_BASE = "0x4200000000000000000000000000000000000006" as const; // any token other than the escrow's
+  const base = (amount: bigint, token: `0x${string}`): OrderData => ({
+    inputToken: token, inputAmount: amount, outputToken: addr.tokenDest, outputAmount: (amount * 999n) / 1000n || 1n,
+    recipient: userAddr, destinationChainId: BigInt(chains.dest.id), destinationSettler: addr.destinationSettler,
+    fillDeadline: Math.floor(Date.now() / 1000) + 600,
+  });
+  const send = async (o: OrderData) => {
+    const tx = await user.writeContract({ address: addr.escrow, abi: abi.escrow, functionName: "open", args: [o], chain: chains.origin, account: user.account!, gas: 200_000n });
+    const r = await pub.origin.waitForTransactionReceipt({ hash: tx });
+    return { tx, status: r.status, opened: parseEventLogs({ abi: abi.escrow, logs: r.logs, eventName: "Opened" }).length };
+  };
+  const other = await send(base(smallAmt, WETH_BASE));
+  const dust = await send(base(99_999n, addr.tokenOrigin));
+  record("spam is refused at open (other token, dust)", other.status === "reverted" && dust.status === "reverted" && other.opened + dust.opened === 0,
+    `other-token open: ${other.status}; 0.099999 USDC open: ${dust.status}; orders created: ${other.opened + dust.opened}`,
+    { otherTokenOpen: other.tx, dustOpen: dust.tx });
+}
+
 async function refundUnfilled(hub: EventHub, smallAmt: bigint) {
   const g = await grace();
   const o = await open(smallAmt, 15);
@@ -151,6 +172,8 @@ async function main() {
   await hub.start();
   const all = which === "all";
   const t0 = now();
+  // Sequential first: these two transactions come from the same wallet as the cases below.
+  if (all || which === "spam") await spamRefused(small);
   await Promise.all([
     all || which === "wrong-terms" ? wrongTerms(hub, small) : null,
     all || which === "late-fill" ? lateFill(small) : null,

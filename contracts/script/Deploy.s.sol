@@ -95,9 +95,14 @@ contract DeployOrigin is Base {
         uint256 cap = vm.envOr("OUTFLOW_CAP", uint256(500_000_000));
         uint256 window = vm.envOr("OUTFLOW_WINDOW", uint256(3600));
 
+        // The one route: Circle test USDC on Base Sepolia in, Circle test USDC on Unichain Sepolia out.
+        address tokenIn = vm.envOr("ORIGIN_TOKEN", address(0x036CbD53842c5426634e7929541eC2318f3dCF7e));
+        address tokenOut = vm.envOr("DEST_TOKEN", address(0x31d0220469e10c4E71834a79b1f276d740d3768F));
+        uint256 minIn = vm.envOr("MIN_ORDER", uint256(100_000)); // 0.1 USDC
+
         vm.startBroadcast();
         OriginEscrow escrow = new OriginEscrow{value: fund}(
-            IPayable(payable(BASE_SEPOLIA_CALLBACK_PROXY)), rc, grace, UNICHAIN_SEPOLIA, dest, cap, window
+            IPayable(payable(BASE_SEPOLIA_CALLBACK_PROXY)), rc, grace, UNICHAIN_SEPOLIA, dest, cap, window, tokenIn, tokenOut, minIn
         );
         vm.stopBroadcast();
         _write("3-origin", "originEscrow", address(escrow));

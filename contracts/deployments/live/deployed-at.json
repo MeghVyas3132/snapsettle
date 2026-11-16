@@ -1,6 +1,8 @@
 {
-  "current": "v2",
+  "current": "v3",
   "v2": "2026-11-15T23:36:54Z",
   "v1Addresses": "contracts/deployments/live-v1/",
-  "note": "v2 adds confirm-on-destination for delayed tiers (no cron) and an outflow cap. v1 evidence stays in evidence/live/, labelled by escrow address."
+  "note": "v3 adds a fixed token pair (Circle USDC Base Sepolia -> Unichain Sepolia) and a 0.1 USDC minimum to OriginEscrow.open, so spam in other tokens or dust reverts before an event exists. v2 added confirm-on-destination (no cron) and the outflow cap. Earlier evidence stays in evidence/live/, labelled by escrow address.",
+  "v3": "2026-11-16T13:12:38Z",
+  "v2Addresses": "contracts/deployments/live-v2/"
 }

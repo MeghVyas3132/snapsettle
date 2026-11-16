@@ -85,10 +85,11 @@ function hide(n: Note) {
 /** Called every frame by the scene. */
 export function layoutNotes(scene: ClockScene) {
   const narrow = innerWidth < 720;
+  const placed: Array<{ l: number; r: number; t: number; b: number }> = [];
   for (const n of notes.values()) {
     const a = scene.project(n.anchor);
     // Narrow screens keep the hero and the contract names; the chapter text carries the rest.
-    const o = vis[n.group] * (narrow && (n.minor || n.group === "loop" || n.group === "tiers" || n.group === "refuse") ? 0 : 1);
+    const o = vis[n.group] * (narrow && (n.minor || n.group === "hero" || n.group === "loop" || n.group === "tiers" || n.group === "refuse") ? 0 : 1);
     if (!a || !a.on || o < 0.01) {
       hide(n);
       continue;
@@ -101,7 +102,12 @@ export function layoutNotes(scene: ClockScene) {
     // In the chapters the left column holds the text: labels stay right of it.
     const minLeft = !narrow && n.group !== "hero" ? innerWidth * 0.43 : 12;
     const left = Math.max(minLeft, Math.min(innerWidth - w - 12, n.dx < 0 ? lx - w : lx));
-    const top = Math.max(64, Math.min(innerHeight - h - 16, ly - h / 2));
+    let top = Math.max(64, Math.min(innerHeight - h - 16, ly - h / 2));
+    // Labels never sit on each other: one that would overlap an earlier label this frame moves below it.
+    for (const r of placed) {
+      if (left < r.r && left + w > r.l && top < r.b && top + h + 6 > r.t) top = r.b + 6;
+    }
+    placed.push({ l: left, r: left + w, t: top, b: top + h + 6 });
     const key = `${left.toFixed(0)}|${top.toFixed(0)}|${o.toFixed(2)}`;
     if (key !== n.last) {
       n.last = key;

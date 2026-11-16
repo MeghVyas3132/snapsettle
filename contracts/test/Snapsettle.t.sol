@@ -10,6 +10,7 @@ import {OriginEscrow} from "../src/OriginEscrow.sol";
 import {DestinationSettler} from "../src/DestinationSettler.sol";
 import {SnapsettleReactive} from "../src/SnapsettleReactive.sol";
 import {SnapsettleHarness} from "./helpers/SnapsettleHarness.sol";
+import {TestToken} from "./helpers/TestToken.sol";
 
 contract SnapsettleTest is SnapsettleHarness {
     // ------------------------------------------------------------ wiring
@@ -339,6 +340,34 @@ contract SnapsettleTest is SnapsettleHarness {
         escrow.open(d);
     }
 
+    /// @notice Spam in a worthless token reverts before `Opened` exists, so it costs the reactive contract nothing.
+    function test_open_rejectsOtherTokens() public {
+        TestToken junk = new TestToken("JUNK", "JUNK");
+        junk.mint(user, 1e18);
+        vm.prank(user);
+        junk.approve(address(escrow), type(uint256).max);
+        OrderData memory d = _order(1e6, 1e6, uint32(block.timestamp + 1 hours));
+        d.inputToken = address(junk);
+        vm.chainId(ORIGIN);
+        vm.prank(user);
+        vm.expectRevert(OriginEscrow.TokenNotAllowed.selector);
+        escrow.open(d);
+
+        d = _order(1e6, 1e6, uint32(block.timestamp + 1 hours));
+        d.outputToken = address(junk);
+        vm.prank(user);
+        vm.expectRevert(OriginEscrow.TokenNotAllowed.selector);
+        escrow.open(d);
+    }
+
+    function test_open_rejectsDust() public {
+        OrderData memory d = _order(MIN_ORDER - 1, MIN_ORDER - 1, uint32(block.timestamp + 1 hours));
+        vm.chainId(ORIGIN);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(OriginEscrow.BelowMinimum.selector, MIN_ORDER));
+        escrow.open(d);
+    }
+
     /// @notice A faulty or compromised Reactive can release at most CAP per window; the rest waits, and is
     ///         paid when the window has room.
     function test_outflowCap_defersThenReleases() public {
@@ -375,7 +404,7 @@ contract SnapsettleTest is SnapsettleHarness {
     /// @notice Whatever the order size and event ordering, the escrow pays out exactly once: either the
     ///         full input to the solver or the full input back to the user.
     function testFuzz_escrowPaysExactlyOnce(uint96 rawAmount, bool fillFirst, bool filled, bool askRefund) public {
-        uint256 amount = bound(uint256(rawAmount), 100, 100_000e6); // output = 99% must be > 0
+        uint256 amount = bound(uint256(rawAmount), MIN_ORDER, 100_000e6);
         (bytes32 id, OrderData memory d, Vm.Log[] memory openLogs) = _openNoDeliver(amount);
         if (filled && fillFirst) _fill(id, d);
         _deliver(openLogs, ORIGIN, address(escrow));

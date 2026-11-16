@@ -22,7 +22,7 @@ const V: Record<string, View> = {
 function view(name: string): View {
   const v = V[name];
   if (innerWidth / innerHeight >= 0.9) return v;
-  const drop = name === "hero" || name === "intro" || name === "rest" ? 4.2 : 3.4;
+  const drop = name === "hero" || name === "intro" ? 9.4 : name === "rest" ? 4.2 : 3.4;
   return { ...v, tgtX: v.tgtX * 0.1 + 0.4, tgtY: v.tgtY - drop, camX: v.camX * 1.15, camY: v.camY * 1.2, camZ: v.camZ * 1.3 };
 }
 

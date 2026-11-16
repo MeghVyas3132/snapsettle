@@ -73,7 +73,8 @@ for (const env of envs) {
         const atFile = join(root, "contracts/deployments", env, "deployed-at.json");
         const at = existsSync(atFile) ? JSON.parse(readFileSync(atFile, "utf8")) : {};
         const stamp = Date.parse(d.slice(9).replace(/T(\d\d)-(\d\d)-(\d\d)-(\d{3})Z$/, "T$1:$2:$3.$4Z"));
-        const deployment = env === "live" && at.v2 && stamp < Date.parse(at.v2) ? "previous" : "current";
+        const liveSince = at.current && at[at.current] ? Date.parse(at[at.current]) : NaN;
+        const deployment = env === "live" && stamp < liveSince ? "previous" : "current";
         for (const l of readFileSync(cases, "utf8").trim().split("\n").filter(Boolean)) negatives.push({ run: d, deployment, ...JSON.parse(l) });
       }
     }

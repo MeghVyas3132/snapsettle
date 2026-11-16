@@ -167,7 +167,7 @@ function renderTiers(active = Math.round(state.tier)) {
 
 function renderRefusals() {
   const neg = latestNegatives();
-  const chainOf = (k: string) => (/fill/i.test(k) && !/Rejected|Accepted/.test(k) ? "dest" : /Rejected|Accepted/.test(k) ? "lasna" : "origin") as "origin" | "dest" | "lasna";
+  const chainOf = (k: string) => (/Rejected|Accepted/.test(k) ? "lasna" : /fill|confirm/i.test(k) ? "dest" : "origin") as "origin" | "dest" | "lasna";
   const items = neg.map((n) => `<li><b>${esc(n.name.charAt(0).toUpperCase() + n.name.slice(1))}</b><span>${esc(n.detail)}</span><span class="tx">${Object.entries(n.tx).filter(([, v]) => v).map(([k, v]) => `${esc(k)} ${link(chainOf(k), "tx", v)}`).join(" · ")}</span></li>`);
   const refunds = store.evidence.refunds ?? [];
   if (refunds.length) {
