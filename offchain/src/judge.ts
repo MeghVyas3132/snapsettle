@@ -98,7 +98,7 @@ L.push(
   "",
   "## 3. Latency on the current contracts, four clocks",
   "",
-  "Each clock has a known bias. They agree within their resolution; where they differ, the reason is stated.",
+  "Each clock has a known bias, stated under the table. No single one is exact; read them together. The headline (about 2 s on sight) is clock B; clock C, which uses no RPC at all, puts the same tier at about 1 s.",
   "",
   "| Tier | Loops settled / orders | A. Whole loop, Base blocks ×200 ms (p50 · p95) | B. Fill → repaid, A minus the solver's fill time | C. Fill → repaid, block timestamps (1 s) | D. Fill → repaid, one observer's wall clock |",
   "|---|---|---|---|---|---|",
@@ -118,7 +118,7 @@ for (const t of tiers) {
 L.push(
   "",
   "- **A** counts Base Sepolia blocks (200 ms each) between the open and the repayment: the most RPC-independent measure, 200 ms resolution.",
-  "- **B** subtracts the solver's own measured open → fill time (its receipt, one machine) from A. It inherits RPC lag on the fill side, so it reads slightly high.",
+  "- **B** subtracts the open → fill time from A. That time runs from when the bench got the open's receipt to when the solver got its fill receipt, so a slow fill receipt makes B read low. It does on the delayed tiers, run four orders at a time: B is about 4 s under C there.",
   "- **C** uses each chain's block timestamps, which are whole seconds and come from two different chains: it reads low by up to a second and can't resolve below 1 s.",
   "- **D** is when one observer polling public RPCs every ~150 ms first saw each event: an upper bound.",
   "- Delayed tiers include their policy delay (30 s / 300 s) plus the confirm on Unichain.",
@@ -145,11 +145,12 @@ const sumErr = (rs: Run[]) => rs.reduce((a, r) => a + r.errors, 0);
 const unsettled = (rs: Run[]) => rs.reduce((a, r) => a + r.loops.filter((l) => !l.ok).length, 0);
 const backfilled = runs.reduce((a, r) => a + r.loops.filter((l) => l.settleSeenBy === "backfill").length, 0);
 L.push(
-  `| Opens that reverted on Base before an order existed (the bench's wallet was briefly short of USDC) | v2: ${sumErr(cur)} · v1: ${sumErr(prev)} | \`errors.jsonl\` in each run |`,
+  `| Bench errors before an order existed: all but one are reverted opens, the other a bench parsing bug. The bench kept only the first line of each error, so the revert reasons were lost (fixed). They cluster at balance top-ups, and the one open revert decoded since was \`ERC20: transfer amount exceeds balance\`, so a short wallet is likely but not proven | v2: ${sumErr(cur)} · v1: ${sumErr(prev)} | \`errors.jsonl\` in each run |`,
   `| Recorded orders not settled by the bench's timeout | v2: ${unsettled(cur)} · v1: ${unsettled(prev)} | \`loops.jsonl\`, \`ok: false\` |`,
   `| Orders our solver left unfilled, refunded to the user by Reactive's callback | ${refunds.length} | \`evidence/live/recovery/refunds.jsonl\` |`,
   `| Settlements the observer missed (its log scanner fell >200 blocks behind; fixed), completed from chain logs | ${backfilled} | the tier-2 run with \`loops.observed.jsonl\` |`,
   "| Solver process crashed on an RPC timeout (fixed: scan errors no longer stop it) | 1 | `docs/DECISIONS.md` |",
+  "| Solver stalled after its log cursor fell >200 Base blocks behind (bug introduced by the speed-up, fixed); 3 tier-0 orders went unfilled and were refunded | 1 | `docs/DECISIONS.md` |",
   "| Interrupted run kept, not deleted | 1 | `bench-tier2-2026-11-15T18-38-52-553Z` |",
 );
 if (reorg) L.push(`| Reorg check: recorded transactions re-fetched on ${reorg.at.slice(0, 10)}; missing / moved block / now failed | ${reorg.missing} / ${reorg.changedBlock} / ${reorg.failedNow} of ${reorg.checked} | \`evidence/live/reorg-check.json\` |`);

@@ -184,9 +184,11 @@ async function main() {
       try {
         rows.push(await oneLoop(i, amount, hub));
       } catch (e) {
-        const msg = (e as Error).message.split("\n")[0];
+        // keep the decoded reason too (viem puts it on the second line / in .reason), not just the headline
+        const err = e as Error & { shortMessage?: string; cause?: { reason?: string } };
+        const msg = (err.shortMessage ?? err.message.split("\n").slice(0, 2).join(" ")).replace(/\s+/g, " ").trim();
         console.error(`#${i} failed: ${msg}`);
-        appendJsonl(`${dir}/errors.jsonl`, { i, error: msg, at: new Date().toISOString() });
+        appendJsonl(`${dir}/errors.jsonl`, { i, error: msg, reason: err.cause?.reason ?? null, at: new Date().toISOString() });
       }
       await sleep(GAP);
     }

@@ -1,0 +1,13 @@
+# Negative cases: LIVE
+
+> LIVE testnets.
+
+| Case | Result | Detail | Transactions |
+|---|---|---|---|
+| wrong-terms fill is not settled, genuine fill still is | PASS | FillRejected on Lasna seen; settled only after the genuine fill | open: `0x44abd41319183eee4a4c4699deeffe33d9809d165ebf5cbda5a7713f86032a58`<br>wrongFill: `0x4462deda7367779191722944e50946be3a12b0d77b07346c6b2fc3b691614f12`<br>fillRejected: `0x5652228f5546c31bcc60eada3a325aca2cd5bda0792d2900be53ea9cf8fb6ef7`<br>genuineFill: `0xd710cef557e60c428dec4aa1da94f3ddb42531b685c4c498991a08bb02085f21`<br>settle: `0xc0e23e2037230f07a617a34a994727eb98fc6021089c46cda25a0715076ef02b` |
+| late fill reverts on the destination | PASS | fill status: reverted | open: `0xd70c474f784b0a0183efa72d735503c7e3255f08e5b4d08723a0133437bb5a60`<br>lateFill: `0xee295af80773b2664808d65dbb1a25b1f9e91726aa8d14dc3dd5c25a098b6968` |
+| confirm before the delay is refused | PASS | early confirm status: reverted | open: `0x890ac204e3b52fe3cca9d34caff8a09d2981c5e1504ba0acc87f97e8a120aae8`<br>fill: `0x29a59b5c2547f066cb01fff48e7265a1574fc6d7fb62c7eb096e4fcef250ebe6`<br>earlyConfirm: `0xc649affb18eb8e8127b4bf7399d77041914b201b1d8d17d9a22a5e2240aadb4e` |
+| unfilled order is refunded | PASS | refund landed after grace 60s | open: `0xcfb703b7fefe0f0578ce09b0eba87eff83bb25d87e2172dda0316f88000dc3c6`<br>requestRefund: `0xc62eb5c1eea2c3f6349e36444b5cfd4a11a80caae3e31aa3e5790c42023e0707`<br>refund: `0xc066e7c215867bb1c502a746144323300ec8c5a06e96e7c1b7c535dbb1206a5b` |
+| refund request is ignored after a valid fill | PASS | solver paid after confirm; refund not issued | open: `0x890ac204e3b52fe3cca9d34caff8a09d2981c5e1504ba0acc87f97e8a120aae8`<br>fill: `0x29a59b5c2547f066cb01fff48e7265a1574fc6d7fb62c7eb096e4fcef250ebe6`<br>fillAccepted: `0xb38a955896ba0b1952e6f492ab40f096cee9a26d50f78f3ff0b6e857dae21968`<br>requestRefund: `0x7b27290d4695c62f9cbb40189a2f703a27fac44a68346e61871b081f1484b5bf`<br>confirm: `0xe2e71e50f7cdadf646956cb9a2f31433a9cb9c1dce7b433c729dfad34e7d0b92`<br>settle: `0xe5aa7cc4821b79f22bca7ead8260a02b97039e0d9c6b7c2b9af0a8c470df3dab` |
+
+Ran 320 s, 2026-11-16T02:04:03.240Z.
