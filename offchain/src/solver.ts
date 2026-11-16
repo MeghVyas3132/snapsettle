@@ -116,16 +116,18 @@ async function main() {
   await pub.dest.getTransactionCount({ address: solverAddr, blockTag: "pending" });
   console.log(`solver (${ENV}) ${solverAddr}, repay to ${repayTo}; parallel fills, fixed gas, cached fees`);
   let from = await pub.origin.getBlockNumber();
+  let head = from;
   const seen = new Set<Hex>();
-  let idle = 0;
+  // The chain head is tracked in the background, so the hot loop stays one call and never asks for a range the
+  // RPC refuses (Base Sepolia's public RPC rejects getLogs over 200 blocks).
+  setInterval(() => void pub.origin.getBlockNumber().then((h) => { if (h > head) head = h; }).catch(() => undefined), 1000);
 
   // A failed RPC call skips this poll; it must never stop the solver.
   const scan = async () => {
-    // One call per poll: logs up to the head, from a cursor that re-scans the last few blocks.
-    const logs = await pub.origin.getContractEvents({ address: addr.escrow, abi: abi.escrow, eventName: "Opened", fromBlock: from + 1n, toBlock: "latest" });
-    let top = from;
+    if (head <= from) return;
+    const to = head - from > 190n ? from + 190n : head;
+    const logs = await pub.origin.getContractEvents({ address: addr.escrow, abi: abi.escrow, eventName: "Opened", fromBlock: from + 1n, toBlock: to });
     for (const l of logs) {
-      if (l.blockNumber! > top) top = l.blockNumber!;
       const a = l.args as { orderId: Hex; order: OrderData };
       if (seen.has(a.orderId)) continue;
       seen.add(a.orderId);
@@ -134,25 +136,13 @@ async function main() {
       const seenAt = now();
       fillOrder(a.orderId, a.order, seenAt).catch((e) => console.error(`skip ${a.orderId.slice(0, 10)}: ${(e as Error).message.split("\n")[0]}`));
     }
-    // Advance the cursor; if the RPC is far ahead of it, catch up in ranges it accepts (Base: 200 blocks).
-    // With no new logs, look up the head only every 20th poll so the hot loop stays one call.
-    if (!logs.length && ++idle % 20 !== 0) return;
-    const head = logs.length ? top : await pub.origin.getBlockNumber();
-    const next = head > 10n ? head - 10n : 0n;
-    if (next > from) from = next > from + 180n ? from + 180n : next;
+    // Re-scan the last few blocks next time: a load-balanced RPC can report a head its log index has not reached.
+    const next = to > 10n ? to - 10n : 0n;
+    if (next > from) from = next;
   };
 
   for (;;) {
-    await scan().catch(async (e) => {
-      const msg = (e as Error).message.split("\n")[0];
-      // "from" past the head (no new block yet): some RPCs return [], others call it invalid. Nothing new either way.
-      if (/invalid param/i.test(msg)) return;
-      // A range the RPC refuses means the cursor fell behind: jump it to the head and keep going.
-      if (/limited to|range|413/i.test(msg)) {
-        const h = await pub.origin.getBlockNumber().catch(() => from);
-        from = h > 190n ? h - 190n : 0n;
-      } else console.error(`scan failed, retrying: ${msg}`);
-    });
+    await scan().catch((e) => console.error(`scan failed, retrying: ${(e as Error).message.split("\n")[0]}`));
     await sleep(100);
   }
 }
