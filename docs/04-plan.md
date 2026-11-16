@@ -4,17 +4,18 @@ Deadline 5 Dec 2026 20:00 UTC. Target submission **1 Dec**.
 
 ## Status (update at the end of every session)
 
-- 2026-11-15: repo created. Contracts (`OriginEscrow`, `DestinationSettler`, `SnapsettleReactive`) and 23 Foundry tests passing (incl. 512-run fuzz on exactly-once payout, react gas < 700k). Deploy scripts written. **Next: owner funds a deployer + imports the keystore; then the live feasibility loop.**
+- 2026-11-15: repo created; contracts and 23 Foundry tests; v1 deployed live (delayed tiers drained on Cron10).
+- 2026-11-16: v2 deployed and verified on Sourcify: delayed tiers settle only from `Confirmed` (the solver's `confirm` re-reads the fill on Unichain), no cron, 500 USDC/hour outflow cap; 34 tests. Live evidence on v2: 52 loops per tier, 5 refusal cases passing, reorg check 0 of 1,578 transactions changed, 3 orders stranded by a solver bug refunded. `JUDGE.md` generated; site live on GitHub Pages. **Next: record the video, keep the solver funded, then submit.**
 
 ## Schedule
 
 | Dates | Milestone | Done |
 |---|---|---|
-| 15–16 Nov | Contracts + tests; **live loop**: one open on Base → fill on Unichain → react on Lasna → settle on Base, timed | contracts ✅ / live ⏳ |
-| 17–21 Nov | ERC-7683 resolver (`estimatedDelaySeconds` = tier), refund path live, tests on real chain behaviour | |
-| 22–25 Nov | Solver bot (viem), loop tracer + bench (50+ loops per tier), negative cases on-chain | |
-| 26–28 Nov | Dashboard (live orders, per-segment latency, "Across would repay at…"), README, JUDGE.md | |
-| 29 Nov–1 Dec | Video < 3 min, polish, **submit** | |
+| 15–16 Nov | Contracts, tests, live loop on all three chains | ✅ |
+| 15–16 Nov | ERC-7683 resolver, refund path, solver, bench (50+ loops per tier), refusal cases on-chain | ✅ |
+| 15–16 Nov | Site, README, JUDGE.md, v2 redeploy after review | ✅ |
+| by 1 Dec | Video < 3 min, final review, **submit** (shown to the owner first) | |
+| optional | Solver and demo service on an always-on server (needs the owner's go-ahead), CCTP rebalancing | |
 | 2–5 Dec | Buffer: keep funded, re-check competitors, fixes | |
 
 ## Owner to-dos (cannot be done by an agent)
